@@ -9,7 +9,7 @@ use std::io::{self, BufRead, BufWriter, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use lol::{Engine, Options};
 
 const VERSION: &str = "100.0.1 (c)2011 moe@busyloop.net";
@@ -19,6 +19,7 @@ const VERSION: &str = "100.0.1 (c)2011 moe@busyloop.net";
     name = "lolcat",
     about,
     version = VERSION,
+    disable_help_flag = true,
     trailing_var_arg = true
 )]
 struct Cli {
@@ -58,6 +59,10 @@ struct Cli {
     #[arg(short = 'f', long = "force", default_value_t = false)]
     force: bool,
 
+    /// Show this message
+    #[arg(short = 'h', long = "help", default_value_t = false)]
+    help: bool,
+
     /// Input files (use "-" for stdin)
     #[arg(default_value = "-")]
     files: Vec<PathBuf>,
@@ -94,6 +99,23 @@ fn file_error(file: &PathBuf, msg: &str) -> ! {
 
 fn main() {
     let cli = Cli::parse();
+
+    // --help: render through the colorizer like the Ruby original
+    if cli.help {
+        let stdout_tty = io::stdout().is_terminal();
+        install_ctrlc_handler(stdout_tty);
+        let help_text = Cli::command().render_long_help().to_string();
+        let opts = Options::for_help();
+        let mut eng = Engine::new();
+        let mut out = BufWriter::new(io::stdout());
+        {
+            let _guard = ResetGuard { tty: stdout_tty };
+            let _ = lol::cat(&mut help_text.as_bytes(), &opts, &mut eng, &mut out);
+            let _ = out.write_all(b"\n");
+            let _ = out.flush();
+        }
+        process::exit(0);
+    }
 
     // range validation (like Ruby's p.die)
     if cli.spread < 0.1 {

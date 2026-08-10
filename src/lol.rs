@@ -45,6 +45,14 @@ impl Options {
             force: false,
         }
     }
+    pub fn for_help() -> Options {
+        Options {
+            animate: false, duration: 12,
+            os: rand::random::<f64>() * 8192.0,
+            speed: 20.0, spread: 8.0, freq: 0.3,
+            ..Options::defaults()
+        }
+    }
 }
 
 pub struct Engine {
