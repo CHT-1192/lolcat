@@ -55,7 +55,11 @@ pub struct Engine {
 
 impl Engine {
     pub fn new() -> Engine {
-        Engine { os: 0.0, paint_init: false, mode: ColorMode::Pal256 }
+        Engine {
+            os: 0.0,
+            paint_init: false,
+            mode: ColorMode::Pal256,
+        }
     }
 }
 
@@ -73,10 +77,22 @@ const XTERM256_PALETTE: [[u8; 3]; 256] = {
     let mut pal = [[0u8; 3]; 256];
     // 0-15: ANSI system colors
     let sys = [
-        [0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0], [0, 0, 128],
-        [128, 0, 128], [0, 128, 128], [192, 192, 192], [128, 128, 128],
-        [255, 0, 0], [0, 255, 0], [255, 255, 0], [0, 0, 255], [255, 0, 255],
-        [0, 255, 255], [255, 255, 255],
+        [0, 0, 0],
+        [128, 0, 0],
+        [0, 128, 0],
+        [128, 128, 0],
+        [0, 0, 128],
+        [128, 0, 128],
+        [0, 128, 128],
+        [192, 192, 192],
+        [128, 128, 128],
+        [255, 0, 0],
+        [0, 255, 0],
+        [255, 255, 0],
+        [0, 0, 255],
+        [255, 0, 255],
+        [0, 255, 255],
+        [255, 255, 255],
     ];
     let cube_levels = [0, 95, 135, 175, 215, 255];
     let mut i = 0;
@@ -154,10 +170,24 @@ pub fn set_mode(eng: &mut Engine, truecolor: bool) {
         Ok("truecolor") | Ok("24bit") => ColorMode::Truecolor,
         _ => ColorMode::Pal256,
     };
-    eng.mode = if truecolor { ColorMode::Truecolor } else { detected };
+    eng.mode = if truecolor {
+        ColorMode::Truecolor
+    } else {
+        detected
+    };
     if std::env::var_os("LOLCAT_DEBUG").is_some() {
-        let num = |m: ColorMode| if m == ColorMode::Truecolor { 16777215 } else { 256 };
-        eprintln!("DEBUG: Paint.mode = {} (detected: {})", num(eng.mode), num(detected));
+        let num = |m: ColorMode| {
+            if m == ColorMode::Truecolor {
+                16777215
+            } else {
+                256
+            }
+        };
+        eprintln!(
+            "DEBUG: Paint.mode = {} (detected: {})",
+            num(eng.mode),
+            num(detected)
+        );
     }
     eng.paint_init = true;
 }
@@ -175,11 +205,20 @@ pub fn scan_pairs(s: &str) -> Vec<(String, Option<char>)> {
         let mut esc = String::new();
         while i < n && chars[i] == '\x1b' {
             match parse_escape(&chars, i) {
-                Some((seq, next)) => { esc.push_str(&seq); i = next; }
+                Some((seq, next)) => {
+                    esc.push_str(&seq);
+                    i = next;
+                }
                 None => break,
             }
         }
-        let ch = if i < n { let c = chars[i]; i += 1; Some(c) } else { None };
+        let ch = if i < n {
+            let c = chars[i];
+            i += 1;
+            Some(c)
+        } else {
+            None
+        };
         pairs.push((esc, ch));
     }
     pairs
@@ -187,7 +226,9 @@ pub fn scan_pairs(s: &str) -> Vec<(String, Option<char>)> {
 
 fn parse_escape(chars: &[char], i: usize) -> Option<(String, usize)> {
     let n = chars.len();
-    if i + 1 >= n { return None; }
+    if i + 1 >= n {
+        return None;
+    }
     let c = chars[i + 1];
     let is_fmt = |ch: char| (0x20..=0x2f).contains(&(ch as u32));
     let is_csi = |ch: char| (0x30..=0x3f).contains(&(ch as u32));
@@ -195,7 +236,9 @@ fn parse_escape(chars: &[char], i: usize) -> Option<(String, usize)> {
 
     if is_fmt(c) {
         let mut j = i + 1;
-        while j < n && is_fmt(chars[j]) { j += 1; }
+        while j < n && is_fmt(chars[j]) {
+            j += 1;
+        }
         if j < n {
             Some((chars[i..=j].iter().collect(), j + 1))
         } else if j - (i + 1) >= 2 {
@@ -205,11 +248,15 @@ fn parse_escape(chars: &[char], i: usize) -> Option<(String, usize)> {
         }
     } else if is_marker(c) {
         let mut j = i + 2;
-        while j < n && chars[j] != '\x07' && chars[j] != '\x1b' { j += 1; }
+        while j < n && chars[j] != '\x07' && chars[j] != '\x1b' {
+            j += 1;
+        }
         Some((chars[i..j].iter().collect(), j))
     } else if c == '[' {
         let mut j = i + 2;
-        while j < n && is_csi(chars[j]) { j += 1; }
+        while j < n && is_csi(chars[j]) {
+            j += 1;
+        }
         if j < n {
             Some((chars[i..=j].iter().collect(), j + 1))
         } else if j - (i + 2) >= 1 {
@@ -224,7 +271,9 @@ fn parse_escape(chars: &[char], i: usize) -> Option<(String, usize)> {
 
 // ── Output ─────────────────────────────────────────────────────────────
 
-fn expand_tabs(s: &str) -> String { s.replace('\t', "        ") }
+fn expand_tabs(s: &str) -> String {
+    s.replace('\t', "        ")
+}
 
 fn strip_csi_ops(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
@@ -234,8 +283,13 @@ fn strip_csi_ops(s: &str) -> String {
     while i < n {
         if chars[i] == '\x1b' && i + 1 < n && chars[i + 1] == '[' {
             let mut j = i + 2;
-            while j < n && (0x30..=0x3f).contains(&(chars[j] as u32)) { j += 1; }
-            if j < n && matches!(chars[j], '@' | 'J' | 'K' | 'P' | 'X') { i = j + 1; continue; }
+            while j < n && (0x30..=0x3f).contains(&(chars[j] as u32)) {
+                j += 1;
+            }
+            if j < n && matches!(chars[j], '@' | 'J' | 'K' | 'P' | 'X') {
+                i = j + 1;
+                continue;
+            }
         }
         out.push(chars[i]);
         i += 1;
@@ -243,23 +297,45 @@ fn strip_csi_ops(s: &str) -> String {
     out
 }
 
-pub fn println(line: &str, opts: &Options, eng: &mut Engine, out: &mut dyn Write) -> io::Result<()> {
+pub fn println(
+    line: &str,
+    opts: &Options,
+    eng: &mut Engine,
+    out: &mut dyn Write,
+) -> io::Result<()> {
     let chomped = line.ends_with('\n');
-    let body = if chomped { &line[..line.len() - 1] } else { line };
+    let body = if chomped {
+        &line[..line.len() - 1]
+    } else {
+        line
+    };
     let mut body = expand_tabs(body);
     if opts.animate {
         println_ani(&mut body, opts, eng, out, chomped)?;
     } else {
         println_plain(&body, opts, eng, out)?;
     }
-    if chomped { out.write_all(b"\n")?; }
+    if chomped {
+        out.write_all(b"\n")?;
+    }
     Ok(())
 }
 
-fn println_plain(str: &str, opts: &Options, eng: &mut Engine, out: &mut dyn Write) -> io::Result<()> {
-    if !eng.paint_init { set_mode(eng, opts.truecolor); }
+fn println_plain(
+    str: &str,
+    opts: &Options,
+    eng: &mut Engine,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    if !eng.paint_init {
+        set_mode(eng, opts.truecolor);
+    }
     let filtered = scan_pairs(str);
-    let reset = if opts.invert { b"\x1b[49m".as_slice() } else { b"\x1b[39m".as_slice() };
+    let reset = if opts.invert {
+        b"\x1b[49m".as_slice()
+    } else {
+        b"\x1b[39m".as_slice()
+    };
     for (i, (esc, ch)) in filtered.iter().enumerate() {
         let rgb = rainbow(opts.freq, eng.os + (i as f64) / opts.spread);
         let code = color_code(eng.mode, opts.invert, rgb);
@@ -281,7 +357,9 @@ fn println_ani(
     out: &mut dyn Write,
     _chomped: bool,
 ) -> io::Result<()> {
-    if str.is_empty() { return Ok(()); }
+    if str.is_empty() {
+        return Ok(());
+    }
     out.write_all(b"\x1b7")?;
     let real_os = eng.os;
     for _ in 1..=opts.duration {
@@ -304,12 +382,16 @@ pub fn cat<R: BufRead + ?Sized>(
     out: &mut dyn Write,
 ) -> io::Result<()> {
     eng.os = opts.os;
-    if opts.animate { out.write_all(b"\x1b[?25l")?; }
+    if opts.animate {
+        out.write_all(b"\x1b[?25l")?;
+    }
     let mut buf = Vec::new();
     loop {
         buf.clear();
         let n = fd.read_until(b'\n', &mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         eng.os += 1.0;
         match std::str::from_utf8(&buf) {
             Ok(s) => println(s, opts, eng, out)?,
@@ -372,21 +454,21 @@ mod tests {
 
     #[test]
     fn rgb_to_256_corners() {
-        assert_eq!(rgb_to_256(0, 0, 0), 0);         // system black
-        assert_eq!(rgb_to_256(255, 255, 255), 15);  // system white (closer than 231)
+        assert_eq!(rgb_to_256(0, 0, 0), 0); // system black
+        assert_eq!(rgb_to_256(255, 255, 255), 15); // system white (closer than 231)
     }
 
     #[test]
     fn rgb_to_256_cube() {
-        assert_eq!(rgb_to_256(95, 0, 0), 52);      // cube (1,0,0)=16+36
-        assert_eq!(rgb_to_256(0, 95, 0), 22);      // cube (0,1,0)=16+6
-        assert_eq!(rgb_to_256(0, 0, 95), 17);      // cube (0,0,1)=16+1
+        assert_eq!(rgb_to_256(95, 0, 0), 52); // cube (1,0,0)=16+36
+        assert_eq!(rgb_to_256(0, 95, 0), 22); // cube (0,1,0)=16+6
+        assert_eq!(rgb_to_256(0, 0, 95), 17); // cube (0,0,1)=16+1
     }
 
     #[test]
     fn rgb_to_256_gray() {
-        assert_eq!(rgb_to_256(8, 8, 8), 232);      // 8 + 10*0
-        assert_eq!(rgb_to_256(18, 18, 18), 233);   // 8 + 10*1
+        assert_eq!(rgb_to_256(8, 8, 8), 232); // 8 + 10*0
+        assert_eq!(rgb_to_256(18, 18, 18), 233); // 8 + 10*1
         assert_eq!(rgb_to_256(238, 238, 238), 255); // 8 + 10*23
     }
 

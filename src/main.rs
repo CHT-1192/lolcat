@@ -6,7 +6,7 @@
 mod lol;
 
 use std::io::{self, BufRead, BufWriter, IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::Parser;
@@ -106,7 +106,9 @@ struct Cli {
 }
 
 /// Terminal restore guard — RAII equivalent of Ruby's `ensure` block.
-struct ResetGuard { tty: bool }
+struct ResetGuard {
+    tty: bool,
+}
 
 impl Drop for ResetGuard {
     fn drop(&mut self) {
@@ -129,7 +131,7 @@ fn install_ctrlc_handler(tty: bool) {
     });
 }
 
-fn file_error(file: &PathBuf, msg: &str) -> ! {
+fn file_error(file: &Path, msg: &str) -> ! {
     eprintln!("lolcat: {}: {}", file.display(), msg);
     process::exit(1);
 }
@@ -149,7 +151,8 @@ fn check_help() -> Option<Options> {
             continue;
         }
         // bundled short: strip 'h', keep the rest (e.g. -ath → -at)
-        if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 1 && arg[1..].contains('h') {
+        if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 1 && arg[1..].contains('h')
+        {
             has_help = true;
             let stripped: String = arg.chars().filter(|&c| c != 'h').collect();
             if stripped != "-" {
@@ -160,7 +163,9 @@ fn check_help() -> Option<Options> {
         filtered.push(arg.clone());
     }
 
-    if !has_help { return None; }
+    if !has_help {
+        return None;
+    }
 
     let cli = Cli::parse_from(&filtered);
     Some(cli_to_opts(&cli))
@@ -171,7 +176,11 @@ fn cli_to_opts(cli: &Cli) -> Options {
     opts.spread = cli.spread;
     opts.freq = cli.freq;
     opts.seed = cli.seed;
-    opts.os = if cli.seed == 0 { rand::random::<u8>() as f64 } else { cli.seed as f64 };
+    opts.os = if cli.seed == 0 {
+        rand::random::<u8>() as f64
+    } else {
+        cli.seed as f64
+    };
     opts.animate = cli.animate;
     opts.duration = cli.duration;
     opts.speed = cli.speed;
@@ -218,7 +227,7 @@ fn main() {
 
     let stdout_tty = io::stdout().is_terminal();
     install_ctrlc_handler(stdout_tty);
-    let mut opts = cli_to_opts(&cli);
+    let opts = cli_to_opts(&cli);
 
     let mut eng = Engine::new();
     let mut out = BufWriter::new(io::stdout());
@@ -258,12 +267,16 @@ fn main() {
                     Ok(0) => break,
                     Ok(_) => {
                         if let Err(e) = out.write_all(line.as_bytes()) {
-                            if e.kind() == io::ErrorKind::BrokenPipe { process::exit(1); }
+                            if e.kind() == io::ErrorKind::BrokenPipe {
+                                process::exit(1);
+                            }
                             file_error(file, &e.to_string());
                         }
                     }
                     Err(e) => {
-                        if e.kind() == io::ErrorKind::BrokenPipe { process::exit(1); }
+                        if e.kind() == io::ErrorKind::BrokenPipe {
+                            process::exit(1);
+                        }
                         file_error(file, &e.to_string());
                     }
                 }
@@ -295,8 +308,8 @@ mod tests {
     #[test]
     fn cli_custom_values() {
         let cli = Cli::parse_from([
-            "lolcat", "-p", "2.5", "-F", "0.3", "-S", "42", "-a", "-d", "6",
-            "-s", "30", "-i", "-t", "-f", "file.txt",
+            "lolcat", "-p", "2.5", "-F", "0.3", "-S", "42", "-a", "-d", "6", "-s", "30", "-i",
+            "-t", "-f", "file.txt",
         ]);
         assert_eq!(cli.spread, 2.5);
         assert_eq!(cli.freq, 0.3);
