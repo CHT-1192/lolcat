@@ -9,10 +9,52 @@ use std::io::{self, BufRead, BufWriter, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process;
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use lol::{Engine, Options};
 
 const VERSION: &str = "100.0.1 (c)2011 moe@busyloop.net";
+
+// Hardcoded help text matching the Ruby optimist educate output exactly.
+// We use this instead of clap's auto-generated help to preserve the
+// original format, then render it through the rainbow colorizer.
+const HELP_HEADER: &str = "\nUsage: lolcat [OPTION]... [FILE]...\n\n\
+Concatenate FILE(s), or standard input, to standard output.\n\
+With no FILE, or when FILE is -, read standard input.\n\n";
+
+const HELP_FOOTER: &str = concat!(
+    "\nExamples:\n",
+    "  lolcat f - g      Output f\'s contents, then stdin, then g\'s contents.\n",
+    "  lolcat            Copy standard input to standard output.\n",
+    "  fortune | lolcat  Display a rainbow cookie.\n",
+    "\n",
+    "Report lolcat bugs to <https://github.com/busyloop/lolcat/issues>\n",
+    "lolcat home page: <https://github.com/busyloop/lolcat/>\n",
+    "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
+);
+
+const HELP_OPTIONS: [(&str, &str); 11] = [
+    ("-p, --spread=<f>", "Rainbow spread (default: 3.0)"),
+    ("-F, --freq=<f>", "Rainbow frequency (default: 0.1)"),
+    ("-S, --seed=<i>", "Rainbow seed, 0 = random (default: 0)"),
+    ("-a, --animate", "Enable psychedelics"),
+    ("-d, --duration=<i>", "Animation duration (default: 12)"),
+    ("-s, --speed=<f>", "Animation speed (default: 20.0)"),
+    ("-i, --invert", "Invert fg and bg"),
+    ("-t, --truecolor", "24-bit (truecolor)"),
+    ("-f, --force", "Force color even when stdout is not a tty"),
+    ("-v, --version", "Print version and exit"),
+    ("-h, --help", "Show this message"),
+];
+
+fn help_text() -> String {
+    let mut s = String::from(HELP_HEADER);
+    for (spec, desc) in &HELP_OPTIONS {
+        s.push_str(&format!("  {:<18}    {}\n", spec, desc));
+    }
+    s.push_str(HELP_FOOTER);
+    s.push('\n');
+    s
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -104,7 +146,7 @@ fn main() {
     if cli.help {
         let stdout_tty = io::stdout().is_terminal();
         install_ctrlc_handler(stdout_tty);
-        let help_text = Cli::command().render_long_help().to_string();
+        let help_text = help_text();
         let opts = Options::for_help();
         let mut eng = Engine::new();
         let mut out = BufWriter::new(io::stdout());
