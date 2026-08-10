@@ -61,7 +61,6 @@ fn help_text() -> String {
     name = "lolcat",
     about,
     version = VERSION,
-    disable_help_flag = true,
     trailing_var_arg = true
 )]
 struct Cli {
@@ -101,10 +100,6 @@ struct Cli {
     #[arg(short = 'f', long = "force", default_value_t = false)]
     force: bool,
 
-    /// Show this message
-    #[arg(short = 'h', long = "help", default_value_t = false)]
-    help: bool,
-
     /// Input files (use "-" for stdin)
     #[arg(default_value = "-")]
     files: Vec<PathBuf>,
@@ -139,25 +134,35 @@ fn file_error(file: &PathBuf, msg: &str) -> ! {
     process::exit(1);
 }
 
-fn main() {
-    let cli = Cli::parse();
+/// Check raw args for -h/--help (including bundled like -ah) before
+/// clap parsing, so we can render the help through the rainbow colorizer.
+fn wants_help() -> bool {
+    std::env::args().skip(1).any(|a| {
+        a == "-h" || a == "--help"                  // standalone
+        || (a.starts_with('-') && a.contains('h')   // bundled short e.g. -ah
+            && !a.starts_with("--"))                 // but not --something
+    })
+}
 
-    // --help: render through the colorizer like the Ruby original
-    if cli.help {
+fn main() {
+    // Intercept --help/-h before clap to render rainbow-colored help
+    if wants_help() {
         let stdout_tty = io::stdout().is_terminal();
         install_ctrlc_handler(stdout_tty);
-        let help_text = help_text();
+        let text = help_text();
         let opts = Options::for_help();
         let mut eng = Engine::new();
         let mut out = BufWriter::new(io::stdout());
         {
             let _guard = ResetGuard { tty: stdout_tty };
-            let _ = lol::cat(&mut help_text.as_bytes(), &opts, &mut eng, &mut out);
+            let _ = lol::cat(&mut text.as_bytes(), &opts, &mut eng, &mut out);
             let _ = out.write_all(b"\n");
             let _ = out.flush();
         }
         process::exit(0);
     }
+
+    let cli = Cli::parse();
 
     // range validation (like Ruby's p.die)
     if cli.spread < 0.1 {
