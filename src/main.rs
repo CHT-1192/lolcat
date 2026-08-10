@@ -134,23 +134,61 @@ fn file_error(file: &PathBuf, msg: &str) -> ! {
     process::exit(1);
 }
 
-/// Check raw args for -h/--help (including bundled like -ah) before
-/// clap parsing, so we can render the help through the rainbow colorizer.
-fn wants_help() -> bool {
-    std::env::args().skip(1).any(|a| {
-        a == "-h" || a == "--help"                  // standalone
-        || (a.starts_with('-') && a.contains('h')   // bundled short e.g. -ah
-            && !a.starts_with("--"))                 // but not --something
-    })
+/// If raw args contain -h/--help (incl. bundled like -ah), strip the
+/// help flag(s) and parse the rest with clap. Returns the parsed options
+/// so help can be rendered through the colorizer with those flags applied.
+/// `-th` → truecolor help, `-ah` → animate help, etc.
+fn check_help() -> Option<Options> {
+    let raw: Vec<String> = std::env::args().collect();
+    let mut has_help = false;
+    let mut filtered: Vec<String> = vec![raw[0].clone()]; // keep bin name
+
+    for arg in &raw[1..] {
+        if arg == "-h" || arg == "--help" {
+            has_help = true;
+            continue;
+        }
+        // bundled short: strip 'h', keep the rest (e.g. -ath → -at)
+        if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 1 && arg[1..].contains('h') {
+            has_help = true;
+            let stripped: String = arg.chars().filter(|&c| c != 'h').collect();
+            if stripped != "-" {
+                filtered.push(stripped);
+            }
+            continue;
+        }
+        filtered.push(arg.clone());
+    }
+
+    if !has_help { return None; }
+
+    let cli = Cli::parse_from(&filtered);
+    Some(cli_to_opts(&cli))
+}
+
+fn cli_to_opts(cli: &Cli) -> Options {
+    let mut opts = Options::defaults();
+    opts.spread = cli.spread;
+    opts.freq = cli.freq;
+    opts.seed = cli.seed;
+    opts.os = if cli.seed == 0 { rand::random::<u8>() as f64 } else { cli.seed as f64 };
+    opts.animate = cli.animate;
+    opts.duration = cli.duration;
+    opts.speed = cli.speed;
+    opts.invert = cli.invert;
+    opts.truecolor = cli.truecolor;
+    opts.force = cli.force;
+    opts
 }
 
 fn main() {
-    // Intercept --help/-h before clap to render rainbow-colored help
-    if wants_help() {
+    // --help/-h: strip it, re-parse the rest, and render help text
+    // through the colorizer with those flags (equivalent to
+    // `echo "help text" | lolcat <other flags>`)
+    if let Some(opts) = check_help() {
         let stdout_tty = io::stdout().is_terminal();
         install_ctrlc_handler(stdout_tty);
         let text = help_text();
-        let opts = Options::for_help();
         let mut eng = Engine::new();
         let mut out = BufWriter::new(io::stdout());
         {
@@ -164,7 +202,7 @@ fn main() {
 
     let cli = Cli::parse();
 
-    // range validation (like Ruby's p.die)
+    // range validation
     if cli.spread < 0.1 {
         eprintln!("Error: argument --spread must be >= 0.1.");
         process::exit(2);
@@ -180,18 +218,7 @@ fn main() {
 
     let stdout_tty = io::stdout().is_terminal();
     install_ctrlc_handler(stdout_tty);
-
-    let mut opts = Options::defaults();
-    opts.spread = cli.spread;
-    opts.freq = cli.freq;
-    opts.seed = cli.seed;
-    opts.os = if cli.seed == 0 { rand::random::<u8>() as f64 } else { cli.seed as f64 };
-    opts.animate = cli.animate;
-    opts.duration = cli.duration;
-    opts.speed = cli.speed;
-    opts.invert = cli.invert;
-    opts.truecolor = cli.truecolor;
-    opts.force = cli.force;
+    let mut opts = cli_to_opts(&cli);
 
     let mut eng = Engine::new();
     let mut out = BufWriter::new(io::stdout());
