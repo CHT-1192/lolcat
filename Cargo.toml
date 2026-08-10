@@ -1,0 +1,15 @@
+[package]
+name = "lolcat"
+version = "100.0.1"
+edition = "2021"
+description = "Rainbow coloring effect for text console display (Rust port of busyloop/lolcat)"
+license = "BSD-3-Clause"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+rand = "0.9"
+
+[profile.release]
+lto = true
+strip = true
