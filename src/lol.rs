@@ -22,6 +22,7 @@ pub struct Options {
     pub seed: i64,
     pub os: f64,
     pub spread: f64,
+    pub angle: f64,
     pub animate: bool,
     pub duration: u64,
     pub speed: f64,
@@ -36,7 +37,8 @@ impl Options {
             freq: 0.1,
             seed: 0,
             os: 0.0,
-            spread: 3.0,
+            spread: 1.0,
+            angle: 71.6,
             animate: false,
             duration: 12,
             speed: 20.0,
@@ -44,6 +46,18 @@ impl Options {
             truecolor: false,
             force: false,
         }
+    }
+
+    /// Per-character (dx) and per-line (dy) phase increments.
+    ///
+    /// The angle is the stripe direction: 0° = up (vertical stripes),
+    /// clockwise positive (90° = right = horizontal stripes), measured in
+    /// the character grid.  Phase advances by 1/spread per grid unit:
+    ///
+    ///     phase(x, y) = os + (x·cosθ + y·sinθ) / spread
+    pub fn phase_step(&self) -> (f64, f64) {
+        let a = self.angle.rem_euclid(360.0).to_radians();
+        (a.cos() / self.spread, a.sin() / self.spread)
     }
 }
 
@@ -330,6 +344,7 @@ fn println_plain(
     if !eng.paint_init {
         set_mode(eng, opts.truecolor);
     }
+    let (dx, _) = opts.phase_step();
     let filtered = scan_pairs(str);
     let reset = if opts.invert {
         b"\x1b[49m".as_slice()
@@ -337,7 +352,7 @@ fn println_plain(
         b"\x1b[39m".as_slice()
     };
     for (i, (esc, ch)) in filtered.iter().enumerate() {
-        let rgb = rainbow(opts.freq, eng.os + (i as f64) / opts.spread);
+        let rgb = rainbow(opts.freq, eng.os + (i as f64) * dx);
         let code = color_code(eng.mode, opts.invert, rgb);
         out.write_all(esc.as_bytes())?;
         out.write_all(&code)?;
@@ -385,6 +400,7 @@ pub fn cat<R: BufRead + ?Sized>(
     if opts.animate {
         out.write_all(b"\x1b[?25l")?;
     }
+    let (_, dy) = opts.phase_step();
     let mut buf = Vec::new();
     loop {
         buf.clear();
@@ -392,7 +408,7 @@ pub fn cat<R: BufRead + ?Sized>(
         if n == 0 {
             break;
         }
-        eng.os += 1.0;
+        eng.os += dy;
         match std::str::from_utf8(&buf) {
             Ok(s) => println(s, opts, eng, out)?,
             Err(_) => out.write_all(&buf)?, // invalid UTF-8 → pass through
@@ -502,11 +518,81 @@ mod tests {
         let input = b"a\nb\n";
         let mut opts = Options::defaults();
         opts.os = 5.0;
+        opts.angle = 90.0; // dy = sin(90°)/1.0 = 1.0 per line
         let mut eng = Engine::new();
         let mut out = Vec::new();
         cat(&mut &input[..], &opts, &mut eng, &mut out).unwrap();
         assert_eq!(eng.os, 7.0); // +1 per line
         assert_eq!(String::from_utf8(out).unwrap().matches('\n').count(), 2);
+    }
+
+    #[test]
+    fn cat_default_dy_matches_classic() {
+        let input = b"a\nb\n";
+        let mut opts = Options::defaults();
+        opts.os = 5.0;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        cat(&mut &input[..], &opts, &mut eng, &mut out).unwrap();
+        let expect = 5.0 + 2.0 * 71.6f64.to_radians().sin();
+        assert!((eng.os - expect).abs() < 1e-9);
+    }
+
+    #[test]
+    fn phase_step_cardinals() {
+        let mut opts = Options::defaults();
+        opts.spread = 2.0;
+
+        opts.angle = 0.0;
+        assert_eq!(opts.phase_step(), (0.5, 0.0)); // up: vertical stripes
+
+        opts.angle = 90.0;
+        let (dx, dy) = opts.phase_step();
+        assert!(dx.abs() < 1e-12);
+        assert_eq!(dy, 0.5); // right: horizontal stripes
+
+        opts.angle = 180.0;
+        let (dx, dy) = opts.phase_step();
+        assert_eq!(dx, -0.5);
+        assert!(dy.abs() < 1e-12);
+
+        opts.angle = 270.0;
+        let (dx, dy) = opts.phase_step();
+        assert!(dx.abs() < 1e-12);
+        assert_eq!(dy, -0.5);
+
+        opts.angle = -360.0; // normalizes to 0
+        assert_eq!(opts.phase_step(), (0.5, 0.0));
+        opts.angle = 360.0;
+        assert_eq!(opts.phase_step(), (0.5, 0.0));
+    }
+
+    #[test]
+    fn phase_step_default_angle() {
+        let opts = Options::defaults();
+        let (dx, dy) = opts.phase_step();
+        assert!((dx - 0.316).abs() < 1e-3);
+        assert!((dy - 0.949).abs() < 1e-3);
+    }
+
+    #[test]
+    fn render_angle_0_vertical_stripes() {
+        let mut opts = Options::defaults();
+        opts.os = 1.0;
+        opts.angle = 0.0; // same phase for every char in the line
+        let exp = b"\x1b[38;5;112ma\x1b[39m\x1b[38;5;112mb\x1b[39m".to_vec();
+        assert_eq!(render("ab", &opts), exp);
+    }
+
+    #[test]
+    fn render_angle_90_chars_same_row_phase() {
+        let mut opts = Options::defaults();
+        opts.os = 1.0;
+        opts.angle = 90.0; // dx ≈ 0: all chars of a row share the phase
+        let out = render("ab", &opts);
+        let s = String::from_utf8(out).unwrap();
+        // both chars carry the same color code
+        assert_eq!(s.matches("\x1b[38;5;112m").count(), 2);
     }
 
     #[test]

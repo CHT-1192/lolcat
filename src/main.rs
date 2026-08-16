@@ -32,10 +32,14 @@ const HELP_FOOTER: &str = concat!(
     "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
 );
 
-const HELP_OPTIONS: [(&str, &str); 11] = [
-    ("-p, --spread=<f>", "Rainbow spread (default: 3.0)"),
+const HELP_OPTIONS: [(&str, &str); 12] = [
+    ("-p, --spread=<f>", "Rainbow spread (default: 1.0)"),
     ("-F, --freq=<f>", "Rainbow frequency (default: 0.1)"),
     ("-S, --seed=<i>", "Rainbow seed, 0 = random (default: 0)"),
+    (
+        "-A, --angle=<f>",
+        "Rainbow direction in degrees (0 = up, clockwise positive; default: 71.6)",
+    ),
     ("-a, --animate", "Enable psychedelics"),
     ("-d, --duration=<i>", "Animation duration (default: 12)"),
     ("-s, --speed=<f>", "Animation speed (default: 20.0)"),
@@ -61,11 +65,12 @@ fn help_text() -> String {
     name = "lolcat",
     about,
     version = VERSION,
-    trailing_var_arg = true
+    trailing_var_arg = true,
+    allow_negative_numbers = true
 )]
 struct Cli {
-    /// Rainbow spread (character widths per line height)
-    #[arg(short = 'p', long = "spread", default_value = "3.0")]
+    /// Rainbow spread (phase advance per grid unit = 1/spread)
+    #[arg(short = 'p', long = "spread", default_value = "1.0")]
     spread: f64,
 
     /// Rainbow frequency
@@ -75,6 +80,10 @@ struct Cli {
     /// Rainbow seed, 0 = random
     #[arg(short = 'S', long = "seed", default_value = "0")]
     seed: i64,
+
+    /// Rainbow direction in degrees: 0 = up (vertical stripes), clockwise positive
+    #[arg(short = 'A', long = "angle", default_value = "71.6")]
+    angle: f64,
 
     /// Enable psychedelics (animation)
     #[arg(short = 'a', long = "animate", default_value_t = false)]
@@ -136,6 +145,23 @@ fn file_error(file: &Path, msg: &str) -> ! {
     process::exit(1);
 }
 
+/// Range validation for numeric options; returns the offending message.
+fn validate(cli: &Cli) -> Result<(), String> {
+    if cli.spread < 0.1 {
+        return Err("--spread must be >= 0.1".into());
+    }
+    if cli.duration < 1 {
+        return Err("--duration must be >= 1".into());
+    }
+    if cli.speed < 0.1 {
+        return Err("--speed must be >= 0.1".into());
+    }
+    if !cli.angle.is_finite() || !(-360.0..=360.0).contains(&cli.angle) {
+        return Err("--angle must be a finite number between -360 and 360".into());
+    }
+    Ok(())
+}
+
 /// If raw args contain -h/--help (incl. bundled like -ah), strip the
 /// help flag(s) and parse the rest with clap. Returns the parsed options
 /// so help can be rendered through the colorizer with those flags applied.
@@ -168,6 +194,10 @@ fn check_help() -> Option<Options> {
     }
 
     let cli = Cli::parse_from(&filtered);
+    if let Err(msg) = validate(&cli) {
+        eprintln!("Error: argument {}.", msg);
+        process::exit(2);
+    }
     Some(cli_to_opts(&cli))
 }
 
@@ -176,6 +206,7 @@ fn cli_to_opts(cli: &Cli) -> Options {
     opts.spread = cli.spread;
     opts.freq = cli.freq;
     opts.seed = cli.seed;
+    opts.angle = cli.angle;
     opts.os = if cli.seed == 0 {
         rand::random::<u8>() as f64
     } else {
@@ -212,16 +243,8 @@ fn main() {
     let cli = Cli::parse();
 
     // range validation
-    if cli.spread < 0.1 {
-        eprintln!("Error: argument --spread must be >= 0.1.");
-        process::exit(2);
-    }
-    if cli.duration < 1 {
-        eprintln!("Error: argument --duration must be >= 1.");
-        process::exit(2);
-    }
-    if cli.speed < 0.1 {
-        eprintln!("Error: argument --speed must be >= 0.1.");
+    if let Err(msg) = validate(&cli) {
+        eprintln!("Error: argument {}.", msg);
         process::exit(2);
     }
 
@@ -293,9 +316,10 @@ mod tests {
     #[test]
     fn cli_defaults() {
         let cli = Cli::parse_from(["lolcat"]);
-        assert_eq!(cli.spread, 3.0);
+        assert_eq!(cli.spread, 1.0);
         assert_eq!(cli.freq, 0.1);
         assert_eq!(cli.seed, 0);
+        assert_eq!(cli.angle, 71.6);
         assert!(!cli.animate);
         assert_eq!(cli.duration, 12);
         assert_eq!(cli.speed, 20.0);
@@ -308,12 +332,13 @@ mod tests {
     #[test]
     fn cli_custom_values() {
         let cli = Cli::parse_from([
-            "lolcat", "-p", "2.5", "-F", "0.3", "-S", "42", "-a", "-d", "6", "-s", "30", "-i",
-            "-t", "-f", "file.txt",
+            "lolcat", "-p", "2.5", "-F", "0.3", "-S", "42", "-A", "90", "-a", "-d", "6", "-s",
+            "30", "-i", "-t", "-f", "file.txt",
         ]);
         assert_eq!(cli.spread, 2.5);
         assert_eq!(cli.freq, 0.3);
         assert_eq!(cli.seed, 42);
+        assert_eq!(cli.angle, 90.0);
         assert!(cli.animate);
         assert_eq!(cli.duration, 6);
         assert_eq!(cli.speed, 30.0);
@@ -324,8 +349,35 @@ mod tests {
     }
 
     #[test]
+    fn cli_angle_negative_and_attached() {
+        let cli = Cli::parse_from(["lolcat", "-A-45"]);
+        assert_eq!(cli.angle, -45.0);
+        let cli = Cli::parse_from(["lolcat", "--angle", "-360"]);
+        assert_eq!(cli.angle, -360.0);
+    }
+
+    #[test]
     fn cli_dash_is_stdin() {
         let cli = Cli::parse_from(["lolcat", "-"]);
         assert_eq!(cli.files[0].to_string_lossy(), "-");
+    }
+
+    #[test]
+    fn validate_ranges() {
+        let ok = |mut f: Box<dyn FnMut(&mut Cli)>| {
+            let mut cli = Cli::parse_from(["lolcat"]);
+            f(&mut cli);
+            validate(&cli)
+        };
+        assert!(ok(Box::new(|_| {})).is_ok());
+        assert!(ok(Box::new(|c| c.spread = 0.05)).is_err());
+        assert!(ok(Box::new(|c| c.duration = 0)).is_err());
+        assert!(ok(Box::new(|c| c.speed = 0.05)).is_err());
+        assert!(ok(Box::new(|c| c.angle = 360.0)).is_ok());
+        assert!(ok(Box::new(|c| c.angle = -360.0)).is_ok());
+        assert!(ok(Box::new(|c| c.angle = 360.1)).is_err());
+        assert!(ok(Box::new(|c| c.angle = -360.1)).is_err());
+        assert!(ok(Box::new(|c| c.angle = f64::NAN)).is_err());
+        assert!(ok(Box::new(|c| c.angle = f64::INFINITY)).is_err());
     }
 }
