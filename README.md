@@ -27,9 +27,8 @@ With no FILE, or when FILE is `-`, read standard input.
 
 | Flag | Description |
 |---|---|
-| `-p`, `--spread <f64>` | Rainbow spread — phase advance per grid unit = 1/spread (default: 1.0) |
-| `-F`, `--freq <f64>` | Rainbow frequency (default: 0.1) |
-| `-S`, `--seed <i64>` | Rainbow seed, 0 = random (default: 0) |
+| `-F`, `--freq <f64>` | Rainbow frequency: hue completes one full cycle every F grid units (default: 60) |
+| `-S`, `--seed <i64>` | Rainbow seed: starting hue in degrees, 0 = random (default: 0) |
 | `-A`, `--angle <f64>` | Rainbow direction in degrees: 0 = up, clockwise positive (default: 71.6) |
 | `-a`, `--animate` | Enable psychedelics |
 | `-d`, `--duration <u64>` | Animation duration (default: 12) |
@@ -51,15 +50,24 @@ Angles are measured in the character grid: terminal cells are about twice as
 tall as they are wide, so diagonal stripes appear steeper on screen than the
 given angle. The cardinal directions 0/90/180/270 are exact.
 
+### Frequency
+
+Colors follow a true hue wheel (hue 0° = pure red): the hue rotates one full
+revolution per `F` grid units along the stripe direction. At `-A 0` that is
+one rainbow cycle every `F` characters (`-A 0 -F 5` → red, then back to red on
+the 6th character); at `-A 90` it is every `F` lines. The default `F = 60`
+matches the classic lolcat band width. `-S` sets the starting hue (degrees
+mod 360; random when `0`).
+
 ## Examples
 
 ```bash
 $ echo "hello world" | lolcat
 $ fortune | cowsay | lolcat -a
 $ lolcat -f file1.txt file2.txt
-$ lolcat -A 90 -t -i -p 2.0 -F 0.05 README.md
-$ lolcat -A 0    # vertical stripes
-$ lolcat -A 180  # stripes reversed
+$ lolcat -A 90 -t -i -F 30 README.md
+$ lolcat -A 0 -F 5   # one rainbow cycle per 5 characters
+$ lolcat -A 180      # stripes reversed
 ```
 
 ## License

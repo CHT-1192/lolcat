@@ -1,4 +1,4 @@
-.TH LOLCAT 6 "April 4, 2019"
+.TH LOLCAT 6 "August 16, 2026"
 .\" Please adjust this date whenever revising the manpage.
 .SH NAME
 lolcat \- rainbow coloring effect for text console display
@@ -18,20 +18,21 @@ standard output (like the generic \fBcat\fP), and adds rainbow coloring to it.
 .SH OPTIONS
 
 .TP
-\fB\-p\fP \fIX\fP, \fB\-\-spread=\fIX\fP
-Inclination of the rainbow stripes
-.br
-(character widths per line height; high values (>1000) give almost horizontal stripes, low values (0.1) almost vertical ones; default: 3.0).
-.TP
 \fB\-F\fP \fIX\fP, \fB\-\-freq=\fIX\fP
-Frequency of the rainbow effect.
+Rainbow frequency: the hue completes one full revolution every \fIX\fP grid units.
 .br
-(low values around 0.0001 give almost monochrome screens; default: 0.1).
+(at \-A 0 that is one rainbow cycle per \fIX\fP characters; default: 60).
 .TP
 \fB\-S\fP \fIX\fP, \fB\-\-seed=\fIX\fP
-Initial value for the random number generator; 0 means automatic.
+Starting hue in degrees (mod 360); 0 means random.
 .br
 (default: 0).
+.TP
+\fB\-A\fP \fIX\fP, \fB\-\-angle=\fIX\fP
+Stripe direction in degrees: 0 = up (vertical stripes), clockwise positive
+(90 = right = horizontal stripes); finite values within -360..360.
+.br
+(default: 71.6).
 .TP
 \fB\-a\fP, \fB\-\-animate\fP
 Fade every line through an animation before printing the next one.

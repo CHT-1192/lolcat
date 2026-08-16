@@ -2,11 +2,12 @@
 // All rights reserved.
 // ... (BSD 3-Clause, see LICENSE)
 //
-//! Rainbow coloring engine — modern Rust port of lol.rb.
+//! Rainbow coloring engine — Rust port of lol.rb with an angle/cycle model.
 //!
-//! Uses line-based reading (not chunked), standard xterm-256 nearest-color
-//! mapping (not Paint gem grayscale heuristic), and no partial-line phase
-//! tricks. Otherwise identical to the original ruby algorithm.
+//! Uses line-based reading (not chunked), a true hue wheel (hue 0° = pure
+//! red, one full revolution per `freq` grid units), standard xterm-256
+//! nearest-color mapping (not Paint gem grayscale heuristic), and no
+//! partial-line phase tricks.
 
 use std::io::{self, BufRead, Write};
 
@@ -21,7 +22,6 @@ pub struct Options {
     pub freq: f64,
     pub seed: i64,
     pub os: f64,
-    pub spread: f64,
     pub angle: f64,
     pub animate: bool,
     pub duration: u64,
@@ -34,10 +34,9 @@ pub struct Options {
 impl Options {
     pub fn defaults() -> Options {
         Options {
-            freq: 0.1,
+            freq: 60.0,
             seed: 0,
             os: 0.0,
-            spread: 1.0,
             angle: 71.6,
             animate: false,
             duration: 12,
@@ -48,16 +47,20 @@ impl Options {
         }
     }
 
-    /// Per-character (dx) and per-line (dy) phase increments.
+    /// Per-character (dx) and per-line (dy) hue increments, in degrees.
     ///
     /// The angle is the stripe direction: 0° = up (vertical stripes),
     /// clockwise positive (90° = right = horizontal stripes), measured in
-    /// the character grid.  Phase advances by 1/spread per grid unit:
+    /// the character grid.  The hue completes one full revolution per
+    /// `freq` grid units along that direction:
     ///
-    ///     phase(x, y) = os + (x·cosθ + y·sinθ) / spread
+    ///     hue(x, y) = os + 360·(x·cosθ + y·sinθ) / freq
+    ///
+    /// `os` is the seed hue offset in degrees.
     pub fn phase_step(&self) -> (f64, f64) {
         let a = self.angle.rem_euclid(360.0).to_radians();
-        (a.cos() / self.spread, a.sin() / self.spread)
+        let step = 360.0 / self.freq;
+        (a.cos() * step, a.sin() * step)
     }
 }
 
@@ -77,12 +80,22 @@ impl Engine {
     }
 }
 
-/// Three sine waves 120° apart, mapped to `[1, 255]`.
-pub fn rainbow(freq: f64, phase: f64) -> [u8; 3] {
-    let r = (freq * phase).sin() * 127.0 + 128.0;
-    let g = (freq * phase + 2.0 * std::f64::consts::PI / 3.0).sin() * 127.0 + 128.0;
-    let b = (freq * phase + 4.0 * std::f64::consts::PI / 3.0).sin() * 127.0 + 128.0;
-    [r as u8, g as u8, b as u8]
+/// True hue wheel: hue 0° = pure red (ff0000), one full revolution around
+/// the HSV circle (yellow → green → cyan → blue → magenta → red).
+pub fn hue_to_rgb(hue: f64) -> [u8; 3] {
+    let h = hue.rem_euclid(360.0);
+    let h6 = h / 60.0;
+    let sector = h6 as i32; // 0..=5
+    let f = h6 - sector as f64;
+    let (r, g, b) = match sector {
+        0 => (1.0, f, 0.0),
+        1 => (1.0 - f, 1.0, 0.0),
+        2 => (0.0, 1.0, f),
+        3 => (0.0, 1.0 - f, 1.0),
+        4 => (f, 0.0, 1.0),
+        _ => (1.0, 0.0, 1.0 - f),
+    };
+    [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
 }
 
 // ── Standard xterm-256 palette (nearest-neighbor) ──────────────────────
@@ -352,7 +365,7 @@ fn println_plain(
         b"\x1b[39m".as_slice()
     };
     for (i, (esc, ch)) in filtered.iter().enumerate() {
-        let rgb = rainbow(opts.freq, eng.os + (i as f64) * dx);
+        let rgb = hue_to_rgb(eng.os + (i as f64) * dx);
         let code = color_code(eng.mode, opts.invert, rgb);
         out.write_all(esc.as_bytes())?;
         out.write_all(&code)?;
@@ -377,9 +390,13 @@ fn println_ani(
     }
     out.write_all(b"\x1b7")?;
     let real_os = eng.os;
+    // Slide the hue by ~3 cycle-steps per frame; with the default freq=60
+    // that is 18°/frame, close to the original lolcat spin (freq*spread =
+    // 0.3 rad ≈ 17.2°/frame).
+    let slide = 3.0 * 360.0 / opts.freq;
     for _ in 1..=opts.duration {
         out.write_all(b"\x1b8")?;
-        eng.os += opts.spread;
+        eng.os += slide;
         println_plain(str, opts, eng, out)?;
         *str = strip_csi_ops(str);
         std::thread::sleep(std::time::Duration::from_secs_f64(1.0 / opts.speed));
@@ -432,39 +449,42 @@ mod tests {
     }
 
     #[test]
-    fn rainbow_seed1_char0() {
-        assert_eq!(rainbow(0.1, 1.0), [140, 231, 12]);
-    }
-
-    #[test]
-    fn rainbow_zero_freq() {
-        assert_eq!(rainbow(0.0, 0.0), [128, 237, 18]);
+    fn hue_to_rgb_wheel() {
+        assert_eq!(hue_to_rgb(0.0), [255, 0, 0]); // red
+        assert_eq!(hue_to_rgb(60.0), [255, 255, 0]); // yellow
+        assert_eq!(hue_to_rgb(120.0), [0, 255, 0]); // green
+        assert_eq!(hue_to_rgb(180.0), [0, 255, 255]); // cyan
+        assert_eq!(hue_to_rgb(240.0), [0, 0, 255]); // blue
+        assert_eq!(hue_to_rgb(300.0), [255, 0, 255]); // magenta
+        assert_eq!(hue_to_rgb(360.0), [255, 0, 0]); // full revolution
+        assert_eq!(hue_to_rgb(-120.0), [0, 0, 255]); // wraps to 240
+        assert_eq!(hue_to_rgb(480.0), [0, 255, 0]); // wraps to 120
     }
 
     #[test]
     fn render_256_fg() {
         let mut opts = Options::defaults();
-        opts.os = 1.0;
-        // (140,231,12) → nearest std: cube(2,4,0) = 16+72+24 = 112
-        let exp = b"\x1b[38;5;112ma\x1b[39m".to_vec();
+        opts.os = 0.0;
+        // hue 0° = (255,0,0) → ANSI bright red = 9
+        let exp = b"\x1b[38;5;9ma\x1b[39m".to_vec();
         assert_eq!(render("a", &opts), exp);
     }
 
     #[test]
     fn render_truecolor() {
         let mut opts = Options::defaults();
-        opts.os = 1.0;
+        opts.os = 0.0;
         opts.truecolor = true;
-        let exp = b"\x1b[38;2;140;231;12ma\x1b[39m".to_vec();
+        let exp = b"\x1b[38;2;255;0;0ma\x1b[39m".to_vec();
         assert_eq!(render("a", &opts), exp);
     }
 
     #[test]
     fn render_invert() {
         let mut opts = Options::defaults();
-        opts.os = 1.0;
+        opts.os = 0.0;
         opts.invert = true;
-        let exp = b"\x1b[48;5;112ma\x1b[49m".to_vec();
+        let exp = b"\x1b[48;5;9ma\x1b[49m".to_vec();
         assert_eq!(render("a", &opts), exp);
     }
 
@@ -517,12 +537,12 @@ mod tests {
     fn cat_line_based() {
         let input = b"a\nb\n";
         let mut opts = Options::defaults();
-        opts.os = 5.0;
-        opts.angle = 90.0; // dy = sin(90°)/1.0 = 1.0 per line
+        opts.os = 0.0;
+        opts.angle = 90.0; // dy = 360/60 = 6.0° per line
         let mut eng = Engine::new();
         let mut out = Vec::new();
         cat(&mut &input[..], &opts, &mut eng, &mut out).unwrap();
-        assert_eq!(eng.os, 7.0); // +1 per line
+        assert_eq!(eng.os, 12.0); // +6 per line
         assert_eq!(String::from_utf8(out).unwrap().matches('\n').count(), 2);
     }
 
@@ -530,69 +550,86 @@ mod tests {
     fn cat_default_dy_matches_classic() {
         let input = b"a\nb\n";
         let mut opts = Options::defaults();
-        opts.os = 5.0;
+        opts.os = 0.0;
         let mut eng = Engine::new();
         let mut out = Vec::new();
         cat(&mut &input[..], &opts, &mut eng, &mut out).unwrap();
-        let expect = 5.0 + 2.0 * 71.6f64.to_radians().sin();
+        let expect = 2.0 * 6.0 * 71.6f64.to_radians().sin();
         assert!((eng.os - expect).abs() < 1e-9);
     }
 
     #[test]
     fn phase_step_cardinals() {
         let mut opts = Options::defaults();
-        opts.spread = 2.0;
+        opts.freq = 60.0; // step = 6°/grid unit
 
         opts.angle = 0.0;
-        assert_eq!(opts.phase_step(), (0.5, 0.0)); // up: vertical stripes
+        assert_eq!(opts.phase_step(), (6.0, 0.0)); // up: vertical stripes
 
         opts.angle = 90.0;
         let (dx, dy) = opts.phase_step();
         assert!(dx.abs() < 1e-12);
-        assert_eq!(dy, 0.5); // right: horizontal stripes
+        assert_eq!(dy, 6.0); // right: horizontal stripes
 
         opts.angle = 180.0;
         let (dx, dy) = opts.phase_step();
-        assert_eq!(dx, -0.5);
+        assert_eq!(dx, -6.0);
         assert!(dy.abs() < 1e-12);
 
         opts.angle = 270.0;
         let (dx, dy) = opts.phase_step();
         assert!(dx.abs() < 1e-12);
-        assert_eq!(dy, -0.5);
+        assert_eq!(dy, -6.0);
 
         opts.angle = -360.0; // normalizes to 0
-        assert_eq!(opts.phase_step(), (0.5, 0.0));
+        assert_eq!(opts.phase_step(), (6.0, 0.0));
         opts.angle = 360.0;
-        assert_eq!(opts.phase_step(), (0.5, 0.0));
+        assert_eq!(opts.phase_step(), (6.0, 0.0));
     }
 
     #[test]
     fn phase_step_default_angle() {
         let opts = Options::defaults();
         let (dx, dy) = opts.phase_step();
-        assert!((dx - 0.316).abs() < 1e-3);
-        assert!((dy - 0.949).abs() < 1e-3);
+        assert!((dx - 1.894).abs() < 1e-3); // 6·cos(71.6°)
+        assert!((dy - 5.693).abs() < 1e-3); // 6·sin(71.6°)
     }
 
     #[test]
     fn render_angle_0_vertical_stripes() {
         let mut opts = Options::defaults();
-        opts.os = 1.0;
-        opts.angle = 0.0; // same phase for every char in the line
-        let exp = b"\x1b[38;5;112ma\x1b[39m\x1b[38;5;112mb\x1b[39m".to_vec();
+        opts.os = 0.0;
+        opts.angle = 0.0; // dx = 6°/char: hues change across the row
+        opts.truecolor = true;
+        let exp = b"\x1b[38;2;255;0;0ma\x1b[39m\x1b[38;2;255;25;0mb\x1b[39m".to_vec();
         assert_eq!(render("ab", &opts), exp);
     }
 
     #[test]
     fn render_angle_90_chars_same_row_phase() {
         let mut opts = Options::defaults();
-        opts.os = 1.0;
-        opts.angle = 90.0; // dx ≈ 0: all chars of a row share the phase
+        opts.os = 0.0;
+        opts.angle = 90.0; // dx ≈ 0: all chars of a row share the hue
         let out = render("ab", &opts);
         let s = String::from_utf8(out).unwrap();
         // both chars carry the same color code
-        assert_eq!(s.matches("\x1b[38;5;112m").count(), 2);
+        assert_eq!(s.matches("\x1b[38;5;9m").count(), 2);
+    }
+
+    #[test]
+    fn hue_cycles_once_per_freq_chars() {
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 0.0;
+        opts.freq = 5.0; // one full hue revolution per 5 chars
+        opts.truecolor = true;
+        let out = render("abcdef", &opts);
+        let s = String::from_utf8(out).unwrap();
+        // chars 0 and 5 (hue 0° and 360°) are both pure red
+        assert!(s.starts_with("\x1b[38;2;255;0;0ma\x1b[39m"));
+        assert!(s.contains("\x1b[38;2;255;0;0mf\x1b[39m"));
+        // char 1 is hue 72° → (204, 255, 0)
+        assert!(s.contains("\x1b[38;2;204;255;0mb\x1b[39m"));
     }
 
     #[test]

@@ -32,10 +32,15 @@ const HELP_FOOTER: &str = concat!(
     "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
 );
 
-const HELP_OPTIONS: [(&str, &str); 12] = [
-    ("-p, --spread=<f>", "Rainbow spread (default: 1.0)"),
-    ("-F, --freq=<f>", "Rainbow frequency (default: 0.1)"),
-    ("-S, --seed=<i>", "Rainbow seed, 0 = random (default: 0)"),
+const HELP_OPTIONS: [(&str, &str); 11] = [
+    (
+        "-F, --freq=<f>",
+        "Rainbow frequency: hue cycles once every F grid units (default: 60)",
+    ),
+    (
+        "-S, --seed=<i>",
+        "Rainbow seed, 0 = random hue (default: 0)",
+    ),
     (
         "-A, --angle=<f>",
         "Rainbow direction in degrees (0 = up, clockwise positive; default: 71.6)",
@@ -69,15 +74,11 @@ fn help_text() -> String {
     allow_negative_numbers = true
 )]
 struct Cli {
-    /// Rainbow spread (phase advance per grid unit = 1/spread)
-    #[arg(short = 'p', long = "spread", default_value = "1.0")]
-    spread: f64,
-
-    /// Rainbow frequency
-    #[arg(short = 'F', long = "freq", default_value = "0.1")]
+    /// Rainbow frequency: hue completes one full cycle every F grid units
+    #[arg(short = 'F', long = "freq", default_value = "60")]
     freq: f64,
 
-    /// Rainbow seed, 0 = random
+    /// Rainbow seed, 0 = random hue
     #[arg(short = 'S', long = "seed", default_value = "0")]
     seed: i64,
 
@@ -147,8 +148,8 @@ fn file_error(file: &Path, msg: &str) -> ! {
 
 /// Range validation for numeric options; returns the offending message.
 fn validate(cli: &Cli) -> Result<(), String> {
-    if cli.spread < 0.1 {
-        return Err("--spread must be >= 0.1".into());
+    if !cli.freq.is_finite() || cli.freq <= 0.0 {
+        return Err("--freq must be a finite number > 0".into());
     }
     if cli.duration < 1 {
         return Err("--duration must be >= 1".into());
@@ -203,14 +204,15 @@ fn check_help() -> Option<Options> {
 
 fn cli_to_opts(cli: &Cli) -> Options {
     let mut opts = Options::defaults();
-    opts.spread = cli.spread;
     opts.freq = cli.freq;
     opts.seed = cli.seed;
     opts.angle = cli.angle;
+    // os is the starting hue in degrees: random around the wheel when
+    // seed = 0, otherwise seed mod 360.
     opts.os = if cli.seed == 0 {
-        rand::random::<u8>() as f64
+        rand::random_range(0.0..360.0)
     } else {
-        cli.seed as f64
+        cli.seed.rem_euclid(360) as f64
     };
     opts.animate = cli.animate;
     opts.duration = cli.duration;
@@ -316,8 +318,7 @@ mod tests {
     #[test]
     fn cli_defaults() {
         let cli = Cli::parse_from(["lolcat"]);
-        assert_eq!(cli.spread, 1.0);
-        assert_eq!(cli.freq, 0.1);
+        assert_eq!(cli.freq, 60.0);
         assert_eq!(cli.seed, 0);
         assert_eq!(cli.angle, 71.6);
         assert!(!cli.animate);
@@ -332,11 +333,10 @@ mod tests {
     #[test]
     fn cli_custom_values() {
         let cli = Cli::parse_from([
-            "lolcat", "-p", "2.5", "-F", "0.3", "-S", "42", "-A", "90", "-a", "-d", "6", "-s",
-            "30", "-i", "-t", "-f", "file.txt",
+            "lolcat", "-F", "30", "-S", "42", "-A", "90", "-a", "-d", "6", "-s", "30", "-i", "-t",
+            "-f", "file.txt",
         ]);
-        assert_eq!(cli.spread, 2.5);
-        assert_eq!(cli.freq, 0.3);
+        assert_eq!(cli.freq, 30.0);
         assert_eq!(cli.seed, 42);
         assert_eq!(cli.angle, 90.0);
         assert!(cli.animate);
@@ -370,7 +370,11 @@ mod tests {
             validate(&cli)
         };
         assert!(ok(Box::new(|_| {})).is_ok());
-        assert!(ok(Box::new(|c| c.spread = 0.05)).is_err());
+        assert!(ok(Box::new(|c| c.freq = 60.0)).is_ok());
+        assert!(ok(Box::new(|c| c.freq = 0.0)).is_err());
+        assert!(ok(Box::new(|c| c.freq = -5.0)).is_err());
+        assert!(ok(Box::new(|c| c.freq = f64::NAN)).is_err());
+        assert!(ok(Box::new(|c| c.freq = f64::INFINITY)).is_err());
         assert!(ok(Box::new(|c| c.duration = 0)).is_err());
         assert!(ok(Box::new(|c| c.speed = 0.05)).is_err());
         assert!(ok(Box::new(|c| c.angle = 360.0)).is_ok());
