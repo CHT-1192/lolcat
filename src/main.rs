@@ -32,7 +32,7 @@ const HELP_FOOTER: &str = concat!(
     "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
 );
 
-const HELP_OPTIONS: [(&str, &str); 11] = [
+const HELP_OPTIONS: [(&str, &str); 12] = [
     (
         "-F, --freq=<f>",
         "Rainbow frequency: hue cycles once every F grid units (default: 60)",
@@ -50,6 +50,10 @@ const HELP_OPTIONS: [(&str, &str); 11] = [
     ("-s, --speed=<f>", "Animation speed (default: 20.0)"),
     ("-i, --invert", "Invert fg and bg"),
     ("-t, --truecolor", "24-bit (truecolor)"),
+    (
+        "-P, --pure",
+        "Pure saturated hue wheel (default: classic pastel)",
+    ),
     ("-f, --force", "Force color even when stdout is not a tty"),
     ("-v, --version", "Print version and exit"),
     ("-h, --help", "Show this message"),
@@ -105,6 +109,10 @@ struct Cli {
     /// 24-bit truecolor mode
     #[arg(short = 't', long = "truecolor", default_value_t = false)]
     truecolor: bool,
+
+    /// Pure saturated hue-wheel palette (default: classic pastel)
+    #[arg(short = 'P', long = "pure", default_value_t = false)]
+    pure: bool,
 
     /// Force color even when stdout is not a tty
     #[arg(short = 'f', long = "force", default_value_t = false)]
@@ -219,6 +227,7 @@ fn cli_to_opts(cli: &Cli) -> Options {
     opts.speed = cli.speed;
     opts.invert = cli.invert;
     opts.truecolor = cli.truecolor;
+    opts.pure = cli.pure;
     opts.force = cli.force;
     opts
 }
@@ -326,6 +335,7 @@ mod tests {
         assert_eq!(cli.speed, 20.0);
         assert!(!cli.invert);
         assert!(!cli.truecolor);
+        assert!(!cli.pure);
         assert!(!cli.force);
         assert_eq!(cli.files.len(), 1);
     }
@@ -334,7 +344,7 @@ mod tests {
     fn cli_custom_values() {
         let cli = Cli::parse_from([
             "lolcat", "-F", "30", "-S", "42", "-A", "90", "-a", "-d", "6", "-s", "30", "-i", "-t",
-            "-f", "file.txt",
+            "-P", "-f", "file.txt",
         ]);
         assert_eq!(cli.freq, 30.0);
         assert_eq!(cli.seed, 42);
@@ -344,6 +354,7 @@ mod tests {
         assert_eq!(cli.speed, 30.0);
         assert!(cli.invert);
         assert!(cli.truecolor);
+        assert!(cli.pure);
         assert!(cli.force);
         assert_eq!(cli.files[0].to_string_lossy(), "file.txt");
     }

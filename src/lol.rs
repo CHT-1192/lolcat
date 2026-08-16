@@ -4,10 +4,14 @@
 //
 //! Rainbow coloring engine — Rust port of lol.rb with an angle/cycle model.
 //!
-//! Uses line-based reading (not chunked), a true hue wheel (hue 0° = pure
-//! red, one full revolution per `freq` grid units), standard xterm-256
-//! nearest-color mapping (not Paint gem grayscale heuristic), and no
-//! partial-line phase tricks.
+//! Uses line-based reading (not chunked), standard xterm-256 nearest-color
+//! mapping (not Paint gem grayscale heuristic), and no partial-line phase
+//! tricks.
+//!
+//! Two palettes share the same hue model (`hue(x, y)` completes one
+//! revolution per `freq` grid units):
+//! - classic (default): the original lolcat sine mapping — pastel colors;
+//! - pure (`-P`): a saturated HSV hue wheel, hue 0° = pure red.
 
 use std::io::{self, BufRead, Write};
 
@@ -23,6 +27,7 @@ pub struct Options {
     pub seed: i64,
     pub os: f64,
     pub angle: f64,
+    pub pure: bool,
     pub animate: bool,
     pub duration: u64,
     pub speed: f64,
@@ -38,6 +43,7 @@ impl Options {
             seed: 0,
             os: 0.0,
             angle: 71.6,
+            pure: false,
             animate: false,
             duration: 12,
             speed: 20.0,
@@ -96,6 +102,19 @@ pub fn hue_to_rgb(hue: f64) -> [u8; 3] {
         _ => (1.0, 0.0, 1.0 - f),
     };
     [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
+}
+
+/// Map a hue (degrees) to RGB: the original lolcat sine mapping (pastel)
+/// unless `pure` requests the saturated hue wheel.
+pub fn color_for(hue: f64, pure: bool) -> [u8; 3] {
+    if pure {
+        return hue_to_rgb(hue);
+    }
+    let h = hue.rem_euclid(360.0).to_radians();
+    let r = h.sin() * 127.0 + 128.0;
+    let g = (h + 2.0 * std::f64::consts::PI / 3.0).sin() * 127.0 + 128.0;
+    let b = (h + 4.0 * std::f64::consts::PI / 3.0).sin() * 127.0 + 128.0;
+    [r as u8, g as u8, b as u8]
 }
 
 // ── Standard xterm-256 palette (nearest-neighbor) ──────────────────────
@@ -365,7 +384,7 @@ fn println_plain(
         b"\x1b[39m".as_slice()
     };
     for (i, (esc, ch)) in filtered.iter().enumerate() {
-        let rgb = hue_to_rgb(eng.os + (i as f64) * dx);
+        let rgb = color_for(eng.os + (i as f64) * dx, opts.pure);
         let code = color_code(eng.mode, opts.invert, rgb);
         out.write_all(esc.as_bytes())?;
         out.write_all(&code)?;
@@ -462,11 +481,22 @@ mod tests {
     }
 
     #[test]
+    fn color_for_palettes() {
+        // classic pastel: hue 0 = soft green (original lolcat sine mapping)
+        assert_eq!(color_for(0.0, false), [128, 237, 18]);
+        // pure wheel: hue 0 = pure red
+        assert_eq!(color_for(0.0, true), [255, 0, 0]);
+        // both wrap around after one revolution
+        assert_eq!(color_for(360.0, false), color_for(0.0, false));
+        assert_eq!(color_for(360.0, true), color_for(0.0, true));
+    }
+
+    #[test]
     fn render_256_fg() {
         let mut opts = Options::defaults();
         opts.os = 0.0;
-        // hue 0° = (255,0,0) → ANSI bright red = 9
-        let exp = b"\x1b[38;5;9ma\x1b[39m".to_vec();
+        // pastel hue 0° = (128,237,18) → nearest xterm-256 = 118
+        let exp = b"\x1b[38;5;118ma\x1b[39m".to_vec();
         assert_eq!(render("a", &opts), exp);
     }
 
@@ -475,7 +505,7 @@ mod tests {
         let mut opts = Options::defaults();
         opts.os = 0.0;
         opts.truecolor = true;
-        let exp = b"\x1b[38;2;255;0;0ma\x1b[39m".to_vec();
+        let exp = b"\x1b[38;2;128;237;18ma\x1b[39m".to_vec();
         assert_eq!(render("a", &opts), exp);
     }
 
@@ -484,7 +514,17 @@ mod tests {
         let mut opts = Options::defaults();
         opts.os = 0.0;
         opts.invert = true;
-        let exp = b"\x1b[48;5;9ma\x1b[49m".to_vec();
+        let exp = b"\x1b[48;5;118ma\x1b[49m".to_vec();
+        assert_eq!(render("a", &opts), exp);
+    }
+
+    #[test]
+    fn render_pure_wheel() {
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.pure = true;
+        // pure hue 0° = (255,0,0) → ANSI bright red = 9
+        let exp = b"\x1b[38;5;9ma\x1b[39m".to_vec();
         assert_eq!(render("a", &opts), exp);
     }
 
@@ -601,7 +641,8 @@ mod tests {
         opts.os = 0.0;
         opts.angle = 0.0; // dx = 6°/char: hues change across the row
         opts.truecolor = true;
-        let exp = b"\x1b[38;2;255;0;0ma\x1b[39m\x1b[38;2;255;25;0mb\x1b[39m".to_vec();
+        // pastel hues 0° and 6°
+        let exp = b"\x1b[38;2;128;237;18ma\x1b[39m\x1b[38;2;141;230;11mb\x1b[39m".to_vec();
         assert_eq!(render("ab", &opts), exp);
     }
 
@@ -613,7 +654,7 @@ mod tests {
         let out = render("ab", &opts);
         let s = String::from_utf8(out).unwrap();
         // both chars carry the same color code
-        assert_eq!(s.matches("\x1b[38;5;9m").count(), 2);
+        assert_eq!(s.matches("\x1b[38;5;118m").count(), 2);
     }
 
     #[test]
@@ -623,6 +664,7 @@ mod tests {
         opts.angle = 0.0;
         opts.freq = 5.0; // one full hue revolution per 5 chars
         opts.truecolor = true;
+        opts.pure = true;
         let out = render("abcdef", &opts);
         let s = String::from_utf8(out).unwrap();
         // chars 0 and 5 (hue 0° and 360°) are both pure red

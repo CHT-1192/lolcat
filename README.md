@@ -35,6 +35,7 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-s`, `--speed <f64>` | Animation speed (default: 20.0) |
 | `-i`, `--invert` | Invert fg and bg |
 | `-t`, `--truecolor` | 24-bit truecolor mode |
+| `-P`, `--pure` | Pure saturated hue wheel (default: classic pastel) |
 | `-f`, `--force` | Force color when stdout is not a tty |
 | `-V`, `--version` | Print version and exit |
 | `-h`, `--help` | Show help and exit |
@@ -52,12 +53,15 @@ given angle. The cardinal directions 0/90/180/270 are exact.
 
 ### Frequency
 
-Colors follow a true hue wheel (hue 0° = pure red): the hue rotates one full
-revolution per `F` grid units along the stripe direction. At `-A 0` that is
-one rainbow cycle every `F` characters (`-A 0 -F 5` → red, then back to red on
-the 6th character); at `-A 90` it is every `F` lines. The default `F = 60`
-matches the classic lolcat band width. `-S` sets the starting hue (degrees
-mod 360; random when `0`).
+The hue rotates one full revolution per `F` grid units along the stripe
+direction. At `-A 0` that is one rainbow cycle every `F` characters; at
+`-A 90` it is every `F` lines. The default `F = 60` matches the classic
+lolcat band width. `-S` sets the starting hue (degrees mod 360; random
+when `0`).
+
+By default colors use the original lolcat sine mapping (soft pastel);
+`-P` switches to a saturated hue wheel where hue 0° = pure red
+(`-P -A 0 -F 5` → ff0000, back to red on the 6th character).
 
 ## Examples
 
@@ -66,8 +70,8 @@ $ echo "hello world" | lolcat
 $ fortune | cowsay | lolcat -a
 $ lolcat -f file1.txt file2.txt
 $ lolcat -A 90 -t -i -F 30 README.md
-$ lolcat -A 0 -F 5   # one rainbow cycle per 5 characters
-$ lolcat -A 180      # stripes reversed
+$ lolcat -P -A 0 -F 5   # pure hues, one rainbow cycle per 5 characters
+$ lolcat -A 180         # stripes reversed
 ```
 
 ## License
