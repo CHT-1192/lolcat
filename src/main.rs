@@ -5,7 +5,7 @@
 
 mod lol;
 
-use std::io::{self, BufRead, BufWriter, IsTerminal, Write};
+use std::io::{self, BufWriter, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use clap::Parser;
 use lol::{Engine, Options};
 
-const VERSION: &str = "100.0.1 (c)2011 moe@busyloop.net";
+const VERSION: &str = "100.0.2 (c)2011 moe@busyloop.net";
 
 // Hardcoded help text matching the Ruby optimist educate output exactly.
 // We use this instead of clap's auto-generated help to preserve the

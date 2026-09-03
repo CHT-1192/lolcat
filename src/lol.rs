@@ -17,7 +17,7 @@
 //! - classic (default): the original lolcat sine mapping — pastel colors;
 //! - pure (`-P`): a saturated HSV hue wheel, hue 0° = pure red.
 
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ColorMode {
@@ -627,7 +627,11 @@ fn paint_stream<R: BufRead + ?Sized>(
 ) -> io::Result<()> {
     const CHUNK: usize = 4096;
     let (dx, dy) = opts.phase_step();
-    let reset: &[u8] = if opts.invert { b"\x1b[49m" } else { b"\x1b[39m" };
+    let reset: &[u8] = if opts.invert {
+        b"\x1b[49m"
+    } else {
+        b"\x1b[39m"
+    };
 
     let mut pending: Vec<u8> = Vec::with_capacity(CHUNK + 64);
     let mut buf = [0u8; CHUNK];
@@ -669,14 +673,7 @@ fn paint_stream<R: BufRead + ?Sized>(
                                 eng.os += dy;
                                 line_start = false;
                             }
-                            emit_char(
-                                out,
-                                eng,
-                                opts,
-                                reset,
-                                b" ",
-                                eng.os + (col as f64) * dx,
-                            )?;
+                            emit_char(out, eng, opts, reset, b" ", eng.os + (col as f64) * dx)?;
                             col += 1;
                         }
                     }
@@ -800,13 +797,12 @@ fn csi_move(seq: &[u8], pos: &mut (i64, i64), saved: &mut (i64, i64)) {
         b'd' => pos.0 = (p(0) - 1).max(0),
         b's' => *saved = *pos, // save cursor
         b'u' => *pos = *saved, // restore cursor
-        b'h' | b'l' => {
+        b'h' | b'l' if p(0) == 1049 || p(0) == 47 => {
             // Entering/leaving the alternate screen resets the coordinate
             // space, so jump back to the top-left corner.
-            if p(0) == 1049 || p(0) == 47 {
-                *pos = (0, 0);
-            }
+            *pos = (0, 0);
         }
+        b'h' | b'l' => {}
         _ => {} // colour/clear/scroll/etc.: cursor unchanged
     }
 }
@@ -827,7 +823,11 @@ fn paint_anchored<R: BufRead + ?Sized>(
 ) -> io::Result<()> {
     const CHUNK: usize = 4096;
     let (dx, dy) = opts.phase_step();
-    let reset: &[u8] = if opts.invert { b"\x1b[49m" } else { b"\x1b[39m" };
+    let reset: &[u8] = if opts.invert {
+        b"\x1b[49m"
+    } else {
+        b"\x1b[39m"
+    };
 
     let mut pending: Vec<u8> = Vec::with_capacity(CHUNK + 64);
     let mut buf = [0u8; CHUNK];
@@ -882,14 +882,7 @@ fn paint_anchored<R: BufRead + ?Sized>(
                     b'\t' => {
                         // Tabs expand to eight cells; colour every cell.
                         for _ in 0..8 {
-                            emit_char(
-                                out,
-                                eng,
-                                opts,
-                                reset,
-                                b" ",
-                                hue_at(eng.os, pos),
-                            )?;
+                            emit_char(out, eng, opts, reset, b" ", hue_at(eng.os, pos))?;
                             pos.1 += 1;
                         }
                     }
@@ -902,7 +895,14 @@ fn paint_anchored<R: BufRead + ?Sized>(
                         out.write_all(&pending[i..i + 1])?;
                     }
                     _ => {
-                        emit_char(out, eng, opts, reset, &pending[i..i + 1], hue_at(eng.os, pos))?;
+                        emit_char(
+                            out,
+                            eng,
+                            opts,
+                            reset,
+                            &pending[i..i + 1],
+                            hue_at(eng.os, pos),
+                        )?;
                         pos.1 += 1;
                     }
                 }
@@ -912,7 +912,14 @@ fn paint_anchored<R: BufRead + ?Sized>(
                 match utf8_char_len(b) {
                     Some(l) if i + l <= plen => {
                         if pending[i + 1..i + l].iter().all(|&c| c & 0xc0 == 0x80) {
-                            emit_char(out, eng, opts, reset, &pending[i..i + l], hue_at(eng.os, pos))?;
+                            emit_char(
+                                out,
+                                eng,
+                                opts,
+                                reset,
+                                &pending[i..i + l],
+                                hue_at(eng.os, pos),
+                            )?;
                             pos.1 += 1;
                             i += l;
                         } else {
@@ -987,6 +994,7 @@ pub fn cat<R: BufRead + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
 
     fn render(body: &str, opts: &Options) -> Vec<u8> {
         let mut eng = Engine::new();
@@ -1097,8 +1105,8 @@ mod tests {
         // Dense grid plus all palette/midpoint boundary values.
         let mut xs: Vec<u8> = (0..=255).step_by(7).collect();
         xs.extend([
-            0, 1, 2, 47, 48, 49, 94, 95, 96, 114, 115, 116, 127, 128, 129, 134, 135, 136,
-            174, 175, 176, 214, 215, 216, 253, 254, 255,
+            0, 1, 2, 47, 48, 49, 94, 95, 96, 114, 115, 116, 127, 128, 129, 134, 135, 136, 174, 175,
+            176, 214, 215, 216, 253, 254, 255,
         ]);
         for &r in &xs {
             for &g in &xs {
@@ -1289,7 +1297,10 @@ mod tests {
             assert!(!s.contains(split), "escape split at {:?}", split);
         }
         // The trailing real text is still emitted.
-        assert!(s.contains('a') && s.contains('b'), "trailing text must be present");
+        assert!(
+            s.contains('a') && s.contains('b'),
+            "trailing text must be present"
+        );
     }
 
     #[test]
@@ -1357,7 +1368,11 @@ mod tests {
         cat(&mut r, &opts, &mut eng, &mut out).unwrap();
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("\x1b[38;2;255;0;0ma\x1b[39m"), "row1 a: {:?}", s);
-        assert!(s.contains("\x1b[38;2;255;25;0mb\x1b[39m"), "row2 b (hue 6): {:?}", s);
+        assert!(
+            s.contains("\x1b[38;2;255;25;0mb\x1b[39m"),
+            "row2 b (hue 6): {:?}",
+            s
+        );
     }
 
     #[test]

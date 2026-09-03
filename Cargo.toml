@@ -1,6 +1,6 @@
 [package]
 name = "lolcat"
-version = "100.0.1"
+version = "100.0.2"
 edition = "2021"
 description = "Rainbow coloring effect for text console display (Rust port of busyloop/lolcat)"
 license = "BSD-3-Clause"
