@@ -27,9 +27,9 @@ With no FILE, or when FILE is `-`, read standard input.
 
 | Flag | Description |
 |---|---|
-| `-F`, `--freq <f64>` | Rainbow frequency: hue completes one full cycle every F grid units (default: 60) |
+| `-F`, `--freq <f64>` | Hue cycles once every F grid units (default: 60) |
 | `-S`, `--seed <i64>` | Rainbow seed: starting hue in degrees, 0 = random (default: 0) |
-| `-A`, `--angle <f64>` | Rainbow direction in degrees: 0 = up, clockwise positive (default: 71.6) |
+| `-A`, `--angle <f64>` | Direction: 0 = up, clockwise positive (default: 71.6) |
 | `-a`, `--animate` | Enable psychedelics |
 | `-d`, `--duration <u64>` | Animation duration (default: 12) |
 | `-s`, `--speed <f64>` | Animation speed (default: 20.0) |

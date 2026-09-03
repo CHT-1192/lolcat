@@ -35,7 +35,7 @@ const HELP_FOOTER: &str = concat!(
 const HELP_OPTIONS: [(&str, &str); 12] = [
     (
         "-F, --freq=<f>",
-        "Rainbow frequency: hue cycles once every F grid units (default: 60)",
+        "Hue cycles once every F grid units (default: 60)",
     ),
     (
         "-S, --seed=<i>",
@@ -43,7 +43,7 @@ const HELP_OPTIONS: [(&str, &str); 12] = [
     ),
     (
         "-A, --angle=<f>",
-        "Rainbow direction in degrees (0 = up, clockwise positive; default: 71.6)",
+        "Direction: 0 = up, clockwise positive (default: 71.6)",
     ),
     ("-a, --animate", "Enable psychedelics"),
     ("-d, --duration=<i>", "Animation duration (default: 12)"),
@@ -55,7 +55,7 @@ const HELP_OPTIONS: [(&str, &str); 12] = [
         "Pure saturated hue wheel (default: classic pastel)",
     ),
     ("-f, --force", "Force color even when stdout is not a tty"),
-    ("-v, --version", "Print version and exit"),
+    ("-V, --version", "Print version and exit"),
     ("-h, --help", "Show this message"),
 ];
 
@@ -294,26 +294,13 @@ fn main() {
                 file_error(file, &e.to_string());
             }
         } else {
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match fd.read_line(&mut line) {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        if let Err(e) = out.write_all(line.as_bytes()) {
-                            if e.kind() == io::ErrorKind::BrokenPipe {
-                                process::exit(1);
-                            }
-                            file_error(file, &e.to_string());
-                        }
-                    }
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::BrokenPipe {
-                            process::exit(1);
-                        }
-                        file_error(file, &e.to_string());
-                    }
+            // stdout is not a tty and --force is off: plain passthrough.
+            // Copy in blocks so newline-less streams still flow.
+            if let Err(e) = io::copy(&mut *fd, &mut out) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    process::exit(1);
                 }
+                file_error(file, &e.to_string());
             }
         }
     }

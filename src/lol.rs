@@ -4,16 +4,20 @@
 //
 //! Rainbow coloring engine — Rust port of lol.rb with an angle/cycle model.
 //!
-//! Uses line-based reading (not chunked), standard xterm-256 nearest-color
-//! mapping (not Paint gem grayscale heuristic), and no partial-line phase
-//! tricks.
+//! Streams input in 4096-byte blocks and colors it as it arrives, like the
+//! Ruby original, so producers that never emit newlines (e.g.
+//! `cmatrix | lolcat`) still get live output. ANSI escapes and UTF-8
+//! characters split across read boundaries are carried over intact, and the
+//! hue phase advances per newline exactly as the earlier line-based port
+//! did. Uses standard xterm-256 nearest-color mapping (not the Paint gem
+//! grayscale heuristic), with no partial-line phase tricks.
 //!
 //! Two palettes share the same hue model (`hue(x, y)` completes one
 //! revolution per `freq` grid units):
 //! - classic (default): the original lolcat sine mapping — pastel colors;
 //! - pure (`-P`): a saturated HSV hue wheel, hue 0° = pure red.
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ColorMode {
@@ -424,8 +428,227 @@ fn println_ani(
     Ok(())
 }
 
-/// Line-based reading — much simpler than the Ruby 4096-byte chunk
-/// heuristic.  Invalid UTF-8 lines are passed through uncolored.
+// ── Streaming output ────────────────────────────────────────────────────
+
+/// Length in bytes of a complete ANSI escape sequence starting at `b[0]`
+/// (which must be ESC), or `None` when the sequence is truncated and more
+/// input is needed to finish it.
+fn escape_len(b: &[u8]) -> Option<usize> {
+    debug_assert_eq!(b[0], 0x1b);
+    if b.len() < 2 {
+        return None;
+    }
+    match b[1] {
+        b'[' => {
+            // CSI: ESC [ params/intermediates (0x20..=0x3f) + final (0x40..=0x7e)
+            let mut j = 2;
+            while j < b.len() && (0x20..=0x3f).contains(&b[j]) {
+                j += 1;
+            }
+            if j < b.len() && (0x40..=0x7e).contains(&b[j]) {
+                Some(j + 1)
+            } else {
+                None
+            }
+        }
+        // OSC/DCS/PM/APC/...: terminated by BEL, or by ESC \ (ST).
+        b']' | b'P' | b'X' | b'^' | b'_' => {
+            let mut j = 2;
+            while j < b.len() && b[j] != 0x07 && b[j] != 0x1b {
+                j += 1;
+            }
+            if j >= b.len() {
+                return None;
+            }
+            if b[j] == 0x07 {
+                Some(j + 1)
+            } else if j + 1 < b.len() && b[j + 1] == b'\\' {
+                Some(j + 2) // ESC \ (string terminator)
+            } else {
+                Some(j + 1)
+            }
+        }
+        // ESC <intermediate> <final>: charset designation `ESC ( B` (ASCII),
+        // DEC graphics `ESC ( 0`, `ESC # 8`, `ESC % G`, `ESC " q`, etc.
+        c if (0x20..=0x2f).contains(&c) => {
+            if b.len() < 3 {
+                return None; // need the final byte
+            }
+            if (0x30..=0x7e).contains(&b[2]) {
+                Some(3)
+            } else {
+                None
+            }
+        }
+        // Plain two-byte sequences (ESC X): e.g. \x1b7, \x1b=, \x1bM.
+        _ => Some(2),
+    }
+}
+
+/// Byte length of a UTF-8 character whose lead byte is `b`, or `None` when
+/// `b` cannot start a character (a continuation or invalid byte).
+fn utf8_char_len(b: u8) -> Option<usize> {
+    match b {
+        0x00..=0x7f => Some(1),
+        0xc2..=0xdf => Some(2),
+        0xe0..=0xef => Some(3),
+        0xf0..=0xf4 => Some(4),
+        _ => None,
+    }
+}
+
+/// Paint one complete character: color code, character bytes, reset.
+fn emit_char(
+    out: &mut dyn Write,
+    eng: &mut Engine,
+    opts: &Options,
+    reset: &[u8],
+    bytes: &[u8],
+    hue: f64,
+) -> io::Result<()> {
+    let rgb = color_for(hue, opts.pure);
+    let code = color_code(eng.mode, opts.invert, rgb);
+    out.write_all(&code)?;
+    out.write_all(bytes)?;
+    out.write_all(reset)
+}
+
+/// Colorize a byte stream as it arrives, without waiting for newlines.
+///
+/// The hue phase advances by `dx` per character within a line and by `dy`
+/// per newline, matching the previous line-based output byte for byte on
+/// ordinary text (the empty-line bookkeeping is preserved too). ANSI
+/// escapes pass through untouched, even when split across reads; a
+/// truncated escape or UTF-8 character at the end of a read is buffered
+/// until it completes. Invalid UTF-8 bytes pass through uncolored.
+fn paint_stream<R: BufRead + ?Sized>(
+    fd: &mut R,
+    opts: &Options,
+    eng: &mut Engine,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    const CHUNK: usize = 4096;
+    let (dx, dy) = opts.phase_step();
+    let reset: &[u8] = if opts.invert { b"\x1b[49m" } else { b"\x1b[39m" };
+
+    let mut pending: Vec<u8> = Vec::with_capacity(CHUNK + 64);
+    let mut buf = [0u8; CHUNK];
+    let mut col: u64 = 0; // character index inside the current line
+    let mut line_start = true; // next painted char begins a line: advance dy first
+    loop {
+        let n = fd.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        pending.extend_from_slice(&buf[..n]);
+        let mut i = 0;
+        let plen = pending.len();
+        while i < plen {
+            let b = pending[i];
+            if b == 0x1b {
+                match escape_len(&pending[i..]) {
+                    Some(l) => {
+                        out.write_all(&pending[i..i + l])?;
+                        i += l;
+                    }
+                    None => break, // truncated escape: wait for more input
+                }
+            } else if b < 0x80 {
+                match b {
+                    b'\n' => {
+                        if line_start {
+                            // An empty line still consumed its own phase step.
+                            eng.os += dy;
+                        }
+                        line_start = true;
+                        col = 0;
+                        out.write_all(b"\n")?;
+                    }
+                    b'\t' => {
+                        // Tabs expand to eight spaces, each painted like a char.
+                        for _ in 0..8 {
+                            if line_start {
+                                eng.os += dy;
+                                line_start = false;
+                            }
+                            emit_char(
+                                out,
+                                eng,
+                                opts,
+                                reset,
+                                b" ",
+                                eng.os + (col as f64) * dx,
+                            )?;
+                            col += 1;
+                        }
+                    }
+                    _ => {
+                        if line_start {
+                            eng.os += dy;
+                            line_start = false;
+                        }
+                        emit_char(
+                            out,
+                            eng,
+                            opts,
+                            reset,
+                            &pending[i..i + 1],
+                            eng.os + (col as f64) * dx,
+                        )?;
+                        col += 1;
+                    }
+                }
+                i += 1;
+            } else {
+                // Multi-byte UTF-8 character, or an invalid byte.
+                match utf8_char_len(b) {
+                    Some(l) if i + l <= plen => {
+                        if pending[i + 1..i + l].iter().all(|&c| c & 0xc0 == 0x80) {
+                            if line_start {
+                                eng.os += dy;
+                                line_start = false;
+                            }
+                            emit_char(
+                                out,
+                                eng,
+                                opts,
+                                reset,
+                                &pending[i..i + l],
+                                eng.os + (col as f64) * dx,
+                            )?;
+                            col += 1;
+                            i += l;
+                        } else {
+                            // Invalid continuation bytes pass through raw.
+                            out.write_all(&pending[i..i + 1])?;
+                            i += 1;
+                        }
+                    }
+                    Some(_) => break, // character split across reads: hold
+                    None => {
+                        out.write_all(&pending[i..i + 1])?;
+                        i += 1;
+                    }
+                }
+            }
+        }
+        if i > 0 {
+            pending.drain(..i);
+        }
+        // Push live so interactive streams (cmatrix etc.) show up promptly.
+        out.flush()?;
+    }
+    // EOF: emit anything left (a truncated escape / split character) raw.
+    if !pending.is_empty() {
+        out.write_all(&pending)?;
+        pending.clear();
+    }
+    Ok(())
+}
+
+/// Colorize a stream of text. Non-animated input is painted incrementally in
+/// 4096-byte blocks (so newline-less producers like `cmatrix` work); with
+/// `--animate` each line is faded through its frames before the next one.
 pub fn cat<R: BufRead + ?Sized>(
     fd: &mut R,
     opts: &Options,
@@ -435,22 +658,26 @@ pub fn cat<R: BufRead + ?Sized>(
     eng.os = opts.os;
     if opts.animate {
         out.write_all(b"\x1b[?25l")?;
-    }
-    let (_, dy) = opts.phase_step();
-    let mut buf = Vec::new();
-    loop {
-        buf.clear();
-        let n = fd.read_until(b'\n', &mut buf)?;
-        if n == 0 {
-            break;
+        let (_, dy) = opts.phase_step();
+        let mut buf = Vec::new();
+        loop {
+            buf.clear();
+            let n = fd.read_until(b'\n', &mut buf)?;
+            if n == 0 {
+                break;
+            }
+            eng.os += dy;
+            match std::str::from_utf8(&buf) {
+                Ok(s) => println(s, opts, eng, out)?,
+                Err(_) => out.write_all(&buf)?, // invalid UTF-8 → pass through
+            }
         }
-        eng.os += dy;
-        match std::str::from_utf8(&buf) {
-            Ok(s) => println(s, opts, eng, out)?,
-            Err(_) => out.write_all(&buf)?, // invalid UTF-8 → pass through
-        }
+        return Ok(());
     }
-    Ok(())
+    if !eng.paint_init {
+        set_mode(eng, opts.truecolor);
+    }
+    paint_stream(fd, opts, eng, out)
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -596,6 +823,123 @@ mod tests {
         cat(&mut &input[..], &opts, &mut eng, &mut out).unwrap();
         let expect = 2.0 * 6.0 * 71.6f64.to_radians().sin();
         assert!((eng.os - expect).abs() < 1e-9);
+    }
+
+    /// Reader that hands out at most `step` bytes per read, to exercise
+    /// escape/UTF-8 sequences split across arbitrary chunk boundaries.
+    struct Steps<'a> {
+        data: &'a [u8],
+        pos: usize,
+        step: usize,
+    }
+
+    impl<'a> Steps<'a> {
+        fn new(data: &'a [u8], step: usize) -> Steps<'a> {
+            Steps { data, pos: 0, step }
+        }
+    }
+
+    impl<'a> Read for Steps<'a> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = (self.data.len() - self.pos).min(self.step).min(buf.len());
+            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    impl<'a> BufRead for Steps<'a> {
+        fn fill_buf(&mut self) -> io::Result<&[u8]> {
+            Ok(&self.data[self.pos..])
+        }
+        fn consume(&mut self, amt: usize) {
+            self.pos += amt;
+        }
+    }
+
+    #[test]
+    fn stream_splits_do_not_corrupt() {
+        let cases: &[&[u8]] = &[
+            b"plain text\nsecond line\n",
+            b"\x1b[31mred\x1b[0m \x1b[1mbold\x1b[0m\n",
+            "你a\n好b\n".as_bytes(),
+            b"\x1b]0;title\x07tail\n",
+            b"mix\xff\xfeutf\n",
+            b"\x1b[31m",
+            b"\r\n",
+            b"\x1b(B \x1b(0x \x1b#8 \x1b%G \x1b\"q\n",
+        ];
+        for data in cases {
+            let run = |step: usize| -> Vec<u8> {
+                let mut opts = Options::defaults();
+                opts.os = 1.0;
+                let mut eng = Engine::new();
+                let mut out = Vec::new();
+                let mut r = Steps::new(data, step);
+                cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+                out
+            };
+            assert_eq!(run(1), run(3), "step 1 vs 3 differs for {:?}", data);
+            assert_eq!(run(1), run(4096), "step 1 vs 4096 differs for {:?}", data);
+        }
+    }
+
+    #[test]
+    fn stream_no_newline_matches_render() {
+        // cmatrix-style input (no '\n' at all) must be painted immediately
+        // and match the per-line renderer for the same body.
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 0.0;
+        opts.truecolor = true;
+        opts.pure = true;
+        let exp = render("abcdef", &opts);
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new(b"abcdef", 2);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        assert_eq!(out, exp);
+        assert_eq!(eng.os, 0.0); // angle 0 → dy = 0
+    }
+
+    #[test]
+    fn stream_advances_os_per_line() {
+        // os bookkeeping identical to the old line-based path: one dy per
+        // line, including empty lines (a\n\nb\n = three advances).
+        let mut opts = Options::defaults();
+        opts.os = 10.0;
+        opts.angle = 90.0; // dy = 6.0 per line, dx = 0
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new(b"a\n\nb\n", 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        assert_eq!(eng.os, 10.0 + 3.0 * 6.0);
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.matches('\n').count(), 3);
+    }
+
+    #[test]
+    fn stream_keeps_charset_designations() {
+        // ESC <intermediate> <final> sequences (charset selection, DEC
+        // alignment, UTF-8 mode, …) must pass through intact, never split
+        // so an escape byte leaks out as a visible coloured character.
+        let data: &[u8] = b"\x1b(B\x1b(0\x1b#8\x1b%G\x1b\"q ab\n";
+        let mut opts = Options::defaults();
+        opts.os = 1.0;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new(data, 1); // 1 byte per read: forces every boundary
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        for seq in ["\x1b(B", "\x1b(0", "\x1b#8", "\x1b%G", "\x1b\"q"] {
+            assert!(s.contains(seq), "missing intact sequence {:?}", seq);
+        }
+        // No colour code may be interposed inside these sequences.
+        for split in ["\x1b(\x1b[", "\x1b#\x1b[", "\x1b%\x1b[", "\x1b\"\x1b["] {
+            assert!(!s.contains(split), "escape split at {:?}", split);
+        }
+        // The trailing real text is still emitted.
+        assert!(s.contains('a') && s.contains('b'), "trailing text must be present");
     }
 
     #[test]
