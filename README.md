@@ -30,6 +30,7 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-F`, `--freq <f64>` | Hue cycles once every F grid units (default: 60) |
 | `-S`, `--seed <i64>` | Rainbow seed: starting hue in degrees, 0 = random (default: 0) |
 | `-A`, `--angle <f64>` | Direction: 0 = up, clockwise positive (default: 71.6) |
+| `-B`, `--anchor` | Color by fixed screen position (stable for TUIs) |
 | `-a`, `--animate` | Enable psychedelics |
 | `-d`, `--duration <u64>` | Animation duration (default: 12) |
 | `-s`, `--speed <f64>` | Animation speed (default: 20.0) |

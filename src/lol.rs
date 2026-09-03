@@ -32,6 +32,7 @@ pub struct Options {
     pub os: f64,
     pub angle: f64,
     pub pure: bool,
+    pub anchor: bool,
     pub animate: bool,
     pub duration: u64,
     pub speed: f64,
@@ -48,6 +49,7 @@ impl Options {
             os: 0.0,
             angle: 71.6,
             pure: false,
+            anchor: false,
             animate: false,
             duration: 12,
             speed: 20.0,
@@ -174,44 +176,121 @@ const XTERM256_PALETTE: [[u8; 3]; 256] = {
     pal
 };
 
+/// Level values of the 6×6×6 colour cube.
+const CUBE_LEVELS: [i32; 6] = [0, 95, 135, 175, 215, 255];
+
 /// Standard xterm-256 nearest-neighbor (not the Paint gem's grayscale
 /// heuristic). Ties go to the lower index.
+///
+/// Instead of scanning all 256 palette entries per colour, only the
+/// genuinely competitive entries are measured: the 16 system colours, the
+/// cube entries built from each channel's nearest level(s) (cube levels are
+/// ≥ 40 apart, so the optimum per channel is always one of the two
+/// neighbouring levels), and the grey levels nearest to the mean channel
+/// value. `rgb_to_256_matches_brute` verifies this equals the naive full
+/// scan for every one of the 2^24 possible inputs.
 pub fn rgb_to_256(red: u8, green: u8, blue: u8) -> u8 {
     let (r, g, b) = (red as i32, green as i32, blue as i32);
-    XTERM256_PALETTE
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, &[pr, pg, pb])| {
-            let dr = (r - pr as i32).pow(2);
-            let dg = (g - pg as i32).pow(2);
-            let db = (b - pb as i32).pow(2);
-            dr + dg + db
-        })
-        .map(|(i, _)| i as u8)
-        .unwrap_or(0)
-}
-
-/// Emit a foreground/background SGR color escape.
-pub fn color_code(mode: ColorMode, invert: bool, rgb: [u8; 3]) -> Vec<u8> {
-    let [r, g, b] = rgb;
-    match mode {
-        ColorMode::Truecolor => {
-            if invert {
-                format!("\x1b[48;2;{};{};{}m", r, g, b)
-            } else {
-                format!("\x1b[38;2;{};{};{}m", r, g, b)
+    let mut best_d = i32::MAX;
+    let mut best_i = 0u8;
+    macro_rules! consider {
+        ($i:expr, $pr:expr, $pg:expr, $pb:expr) => {{
+            let dr = r - $pr;
+            let dg = g - $pg;
+            let db = b - $pb;
+            let d = dr * dr + dg * dg + db * db;
+            let i = $i;
+            if d < best_d || (d == best_d && i < best_i) {
+                best_d = d;
+                best_i = i;
             }
+        }};
+    }
+    // System colours 0..=15 (also covers exact blacks/whites/brights).
+    for (i, p) in XTERM256_PALETTE.iter().enumerate().take(16) {
+        consider!(i as u8, p[0] as i32, p[1] as i32, p[2] as i32);
+    }
+    // Colour cube 16..=231: nearest level index per channel plus ±1
+    // neighbours (ties live at the midpoints between adjacent levels).
+    let span = |c: i32| -> [i32; 3] {
+        let mut lo = 0usize;
+        while lo + 1 < 6 && CUBE_LEVELS[lo + 1] <= c {
+            lo += 1;
         }
-        ColorMode::Pal256 => {
-            let n = rgb_to_256(r, g, b);
-            if invert {
-                format!("\x1b[48;5;{}m", n)
-            } else {
-                format!("\x1b[38;5;{}m", n)
+        let lo = lo as i32;
+        [(lo - 1).max(0), lo, (lo + 1).min(5)]
+    };
+    let (lr, lg, lb) = (span(r), span(g), span(b));
+    for &ri in &lr {
+        for &gi in &lg {
+            for &bi in &lb {
+                let idx = (16 + ri * 36 + gi * 6 + bi) as u8;
+                consider!(
+                    idx,
+                    CUBE_LEVELS[ri as usize],
+                    CUBE_LEVELS[gi as usize],
+                    CUBE_LEVELS[bi as usize]
+                );
             }
         }
     }
-    .into_bytes()
+    // Greys 232..=255: v = 8 + 10k; the best k sits near the mean channel.
+    let m = (r + g + b) / 3;
+    let k0 = ((m - 8 + 5) / 10).clamp(0, 23);
+    for &k in &[(k0 - 1).max(0), k0, (k0 + 1).min(23)] {
+        let v = 8 + 10 * k;
+        consider!((232 + k) as u8, v, v, v);
+    }
+    best_i
+}
+
+/// Append the decimal digits of `v` (≤ 65535) at `buf[pos..]`; returns the
+/// new position.
+fn push_u(buf: &mut [u8], mut pos: usize, mut v: u32) -> usize {
+    let mut any = false;
+    if v >= 100 {
+        buf[pos] = b'0' + (v / 100) as u8;
+        pos += 1;
+        v %= 100;
+        any = true;
+    }
+    if any || v >= 10 {
+        buf[pos] = b'0' + (v / 10) as u8;
+        pos += 1;
+        v %= 10;
+    }
+    buf[pos] = b'0' + v as u8;
+    pos + 1
+}
+
+/// Write a foreground/background SGR colour code into `buf` (no heap
+/// allocation). Returns the number of bytes written.
+pub fn write_sgr(buf: &mut [u8], mode: ColorMode, invert: bool, rgb: [u8; 3]) -> usize {
+    let prefix: &[u8] = match (mode, invert) {
+        (ColorMode::Truecolor, false) => b"\x1b[38;2;",
+        (ColorMode::Truecolor, true) => b"\x1b[48;2;",
+        (ColorMode::Pal256, false) => b"\x1b[38;5;",
+        (ColorMode::Pal256, true) => b"\x1b[48;5;",
+    };
+    let mut n = prefix.len();
+    buf[..n].copy_from_slice(prefix);
+    match mode {
+        ColorMode::Truecolor => {
+            n = push_u(buf, n, rgb[0] as u32);
+            buf[n] = b';';
+            n += 1;
+            n = push_u(buf, n, rgb[1] as u32);
+            buf[n] = b';';
+            n += 1;
+            n = push_u(buf, n, rgb[2] as u32);
+        }
+        ColorMode::Pal256 => {
+            let k = rgb_to_256(rgb[0], rgb[1], rgb[2]);
+            n = push_u(buf, n, k as u32);
+        }
+    }
+    buf[n] = b'm';
+    n + 1
 }
 
 /// Truecolor if `--truecolor` or `COLORTERM ∈ {truecolor, 24bit}`.
@@ -388,15 +467,24 @@ fn println_plain(
         b"\x1b[39m".as_slice()
     };
     for (i, (esc, ch)) in filtered.iter().enumerate() {
-        let rgb = color_for(eng.os + (i as f64) * dx, opts.pure);
-        let code = color_code(eng.mode, opts.invert, rgb);
         out.write_all(esc.as_bytes())?;
-        out.write_all(&code)?;
         if let Some(c) = ch {
-            let mut buf = [0u8; 4];
-            out.write_all(c.encode_utf8(&mut buf).as_bytes())?;
+            if *c == ' ' && !opts.invert {
+                // Foreground-coloured spaces are invisible: emit plainly.
+                out.write_all(b" ")?;
+                continue;
+            }
+            let rgb = color_for(eng.os + (i as f64) * dx, opts.pure);
+            let mut buf = [0u8; 48];
+            let mut n = write_sgr(&mut buf, eng.mode, opts.invert, rgb);
+            let mut cb = [0u8; 4];
+            let enc = c.encode_utf8(&mut cb).as_bytes();
+            buf[n..n + enc.len()].copy_from_slice(enc);
+            n += enc.len();
+            buf[n..n + reset.len()].copy_from_slice(reset);
+            n += reset.len();
+            out.write_all(&buf[..n])?;
         }
-        out.write_all(reset)?;
     }
     Ok(())
 }
@@ -497,7 +585,11 @@ fn utf8_char_len(b: u8) -> Option<usize> {
     }
 }
 
-/// Paint one complete character: color code, character bytes, reset.
+/// Paint one complete character: colour code, character bytes, reset —
+/// composed into a single stack buffer (no per-character allocation).
+/// With a foreground colour a space is invisible anyway, so in normal (non
+/// inverted) mode spaces pass through uncoloured; the cursor/column phase
+/// still advances.
 fn emit_char(
     out: &mut dyn Write,
     eng: &mut Engine,
@@ -506,11 +598,17 @@ fn emit_char(
     bytes: &[u8],
     hue: f64,
 ) -> io::Result<()> {
+    if bytes == b" " && !opts.invert {
+        return out.write_all(b" ");
+    }
     let rgb = color_for(hue, opts.pure);
-    let code = color_code(eng.mode, opts.invert, rgb);
-    out.write_all(&code)?;
-    out.write_all(bytes)?;
-    out.write_all(reset)
+    let mut buf = [0u8; 64];
+    let mut n = write_sgr(&mut buf, eng.mode, opts.invert, rgb);
+    buf[n..n + bytes.len()].copy_from_slice(bytes);
+    n += bytes.len();
+    buf[n..n + reset.len()].copy_from_slice(reset);
+    n += reset.len();
+    out.write_all(&buf[..n])
 }
 
 /// Colorize a byte stream as it arrives, without waiting for newlines.
@@ -646,9 +744,209 @@ fn paint_stream<R: BufRead + ?Sized>(
     Ok(())
 }
 
+// ── Screen-anchored output (--anchor) ───────────────────────────────────
+
+/// Parameter numbers of a CSI sequence (bytes between `ESC [` and the final
+/// byte). Missing parameters become `None`; each opcode applies its own
+/// default. Private markers (`?`, `>`, `<`, `=`) and intermediate bytes are
+/// skipped.
+fn csi_params(seq: &[u8]) -> Vec<Option<u64>> {
+    let mut params = Vec::new();
+    let mut cur: Option<u64> = None;
+    for &b in &seq[2..seq.len().saturating_sub(1)] {
+        match b {
+            b'0'..=b'9' => {
+                let d = (b - b'0') as u64;
+                cur = Some(cur.unwrap_or(0) * 10 + d);
+            }
+            b';' => {
+                params.push(cur);
+                cur = None;
+            }
+            _ => {} // private/intermediate bytes
+        }
+    }
+    params.push(cur);
+    params
+}
+
+/// Apply the cursor-movement effect of a CSI sequence to `(row, col)`.
+fn csi_move(seq: &[u8], pos: &mut (i64, i64), saved: &mut (i64, i64)) {
+    if seq.len() < 3 || seq[1] != b'[' {
+        return;
+    }
+    let params = csi_params(seq);
+    let p = |i: usize| params.get(i).copied().flatten().unwrap_or(1) as i64;
+    match seq[seq.len() - 1] {
+        b'H' | b'f' => {
+            let r = (p(0) - 1).max(0);
+            let c = (p(1) - 1).max(0);
+            pos.0 = r;
+            pos.1 = c;
+        }
+        b'A' => pos.0 -= p(0).max(0),
+        b'B' => pos.0 += p(0),
+        b'C' => pos.1 += p(0),
+        b'D' => pos.1 -= p(0).max(0),
+        b'E' => {
+            pos.0 += p(0);
+            pos.1 = 0;
+        }
+        b'F' => {
+            pos.0 -= p(0).max(0);
+            pos.1 = 0;
+        }
+        b'G' => pos.1 = (p(0) - 1).max(0),
+        b'd' => pos.0 = (p(0) - 1).max(0),
+        b's' => *saved = *pos, // save cursor
+        b'u' => *pos = *saved, // restore cursor
+        b'h' | b'l' => {
+            // Entering/leaving the alternate screen resets the coordinate
+            // space, so jump back to the top-left corner.
+            if p(0) == 1049 || p(0) == 47 {
+                *pos = (0, 0);
+            }
+        }
+        _ => {} // colour/clear/scroll/etc.: cursor unchanged
+    }
+}
+
+/// Colorize a stream whose hue is anchored to screen coordinates.
+///
+/// Full-screen TUIs (btop, htop, ...) redraw only the cells that changed,
+/// jumping around with `ESC [ y ; x H`. In stream order those rewrites land
+/// at unpredictable offsets, so a stream-linear hue flickers. Here the
+/// virtual cursor position (parsed from the escape stream) picks the hue:
+/// hue = os + row·dy + col·dx, so every fixed cell keeps one colour no
+/// matter when or how often it is redrawn.
+fn paint_anchored<R: BufRead + ?Sized>(
+    fd: &mut R,
+    opts: &Options,
+    eng: &mut Engine,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    const CHUNK: usize = 4096;
+    let (dx, dy) = opts.phase_step();
+    let reset: &[u8] = if opts.invert { b"\x1b[49m" } else { b"\x1b[39m" };
+
+    let mut pending: Vec<u8> = Vec::with_capacity(CHUNK + 64);
+    let mut buf = [0u8; CHUNK];
+    let mut pos: (i64, i64) = (0, 0); // (row, col) of the next cell
+    let mut saved: (i64, i64) = (0, 0);
+    let hue_at = |os: f64, pos: (i64, i64)| os + pos.0 as f64 * dy + pos.1 as f64 * dx;
+    loop {
+        let n = fd.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        pending.extend_from_slice(&buf[..n]);
+        let mut i = 0;
+        let plen = pending.len();
+        while i < plen {
+            let b = pending[i];
+            if b == 0x1b {
+                // ESC 7 / ESC 8: save / restore cursor.
+                if i + 1 < plen && (pending[i + 1] == b'7' || pending[i + 1] == b'8') {
+                    if pending[i + 1] == b'7' {
+                        saved = pos;
+                    } else {
+                        pos = saved;
+                    }
+                    out.write_all(&pending[i..i + 2])?;
+                    i += 2;
+                    continue;
+                }
+                match escape_len(&pending[i..]) {
+                    Some(l) => {
+                        if l >= 3 && pending[i + 1] == b'[' {
+                            csi_move(&pending[i..i + l], &mut pos, &mut saved);
+                        }
+                        out.write_all(&pending[i..i + l])?;
+                        i += l;
+                    }
+                    None => break, // truncated escape: wait for more input
+                }
+            } else if b < 0x80 {
+                match b {
+                    b'\n' => {
+                        // Terminal output processing maps LF to CRLF on the
+                        // way to the display, so a new line starts at col 0.
+                        pos.0 += 1;
+                        pos.1 = 0;
+                        out.write_all(b"\n")?;
+                    }
+                    b'\r' => {
+                        pos.1 = 0;
+                        out.write_all(b"\r")?;
+                    }
+                    b'\t' => {
+                        // Tabs expand to eight cells; colour every cell.
+                        for _ in 0..8 {
+                            emit_char(
+                                out,
+                                eng,
+                                opts,
+                                reset,
+                                b" ",
+                                hue_at(eng.os, pos),
+                            )?;
+                            pos.1 += 1;
+                        }
+                    }
+                    0x08 => {
+                        pos.1 = (pos.1 - 1).max(0);
+                        out.write_all(b"\x08")?;
+                    }
+                    c if c < 0x20 || c == 0x7f => {
+                        // Other control bytes: pass through, no cell advance.
+                        out.write_all(&pending[i..i + 1])?;
+                    }
+                    _ => {
+                        emit_char(out, eng, opts, reset, &pending[i..i + 1], hue_at(eng.os, pos))?;
+                        pos.1 += 1;
+                    }
+                }
+                i += 1;
+            } else {
+                // Multi-byte UTF-8 character, or an invalid byte.
+                match utf8_char_len(b) {
+                    Some(l) if i + l <= plen => {
+                        if pending[i + 1..i + l].iter().all(|&c| c & 0xc0 == 0x80) {
+                            emit_char(out, eng, opts, reset, &pending[i..i + l], hue_at(eng.os, pos))?;
+                            pos.1 += 1;
+                            i += l;
+                        } else {
+                            out.write_all(&pending[i..i + 1])?;
+                            i += 1;
+                        }
+                    }
+                    Some(_) => break, // character split across reads: hold
+                    None => {
+                        out.write_all(&pending[i..i + 1])?;
+                        i += 1;
+                    }
+                }
+            }
+        }
+        if i > 0 {
+            pending.drain(..i);
+        }
+        out.flush()?;
+    }
+    if !pending.is_empty() {
+        out.write_all(&pending)?;
+        pending.clear();
+    }
+    Ok(())
+}
+
 /// Colorize a stream of text. Non-animated input is painted incrementally in
 /// 4096-byte blocks (so newline-less producers like `cmatrix` work); with
 /// `--animate` each line is faded through its frames before the next one.
+/// With `--anchor` the hue is computed from the *screen position* of every
+/// character (tracked through the escape stream) instead of its position in
+/// the stream, so a full-screen TUI that redraws only changed cells keeps
+/// stable colours at every fixed location.
 pub fn cat<R: BufRead + ?Sized>(
     fd: &mut R,
     opts: &Options,
@@ -656,7 +954,7 @@ pub fn cat<R: BufRead + ?Sized>(
     out: &mut dyn Write,
 ) -> io::Result<()> {
     eng.os = opts.os;
-    if opts.animate {
+    if opts.animate && !opts.anchor {
         out.write_all(b"\x1b[?25l")?;
         let (_, dy) = opts.phase_step();
         let mut buf = Vec::new();
@@ -677,7 +975,11 @@ pub fn cat<R: BufRead + ?Sized>(
     if !eng.paint_init {
         set_mode(eng, opts.truecolor);
     }
-    paint_stream(fd, opts, eng, out)
+    if opts.anchor {
+        paint_anchored(fd, opts, eng, out)
+    } else {
+        paint_stream(fd, opts, eng, out)
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -773,6 +1075,54 @@ mod tests {
         assert_eq!(rgb_to_256(8, 8, 8), 232); // 8 + 10*0
         assert_eq!(rgb_to_256(18, 18, 18), 233); // 8 + 10*1
         assert_eq!(rgb_to_256(238, 238, 238), 255); // 8 + 10*23
+    }
+
+    /// The naive full-palette scan (reference implementation).
+    fn rgb_brute(r: u8, g: u8, b: u8) -> u8 {
+        XTERM256_PALETTE
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, &[pr, pg, pb])| {
+                let dr = (r as i32 - pr as i32).pow(2);
+                let dg = (g as i32 - pg as i32).pow(2);
+                let db = (b as i32 - pb as i32).pow(2);
+                dr + dg + db
+            })
+            .map(|(i, _)| i as u8)
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn rgb_to_256_matches_brute_sampled() {
+        // Dense grid plus all palette/midpoint boundary values.
+        let mut xs: Vec<u8> = (0..=255).step_by(7).collect();
+        xs.extend([
+            0, 1, 2, 47, 48, 49, 94, 95, 96, 114, 115, 116, 127, 128, 129, 134, 135, 136,
+            174, 175, 176, 214, 215, 216, 253, 254, 255,
+        ]);
+        for &r in &xs {
+            for &g in &xs {
+                for &b in &xs {
+                    assert_eq!(rgb_to_256(r, g, b), rgb_brute(r, g, b), "({r},{g},{b})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "exhaustive over all 2^24 inputs; run with --release -- --ignored"]
+    fn rgb_to_256_matches_brute_exhaustive() {
+        for r in 0..=255u32 {
+            for g in 0..=255u32 {
+                for b in 0..=255u32 {
+                    assert_eq!(
+                        rgb_to_256(r as u8, g as u8, b as u8),
+                        rgb_brute(r as u8, g as u8, b as u8),
+                        "({r},{g},{b})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -940,6 +1290,74 @@ mod tests {
         }
         // The trailing real text is still emitted.
         assert!(s.contains('a') && s.contains('b'), "trailing text must be present");
+    }
+
+    #[test]
+    fn anchor_same_cell_stable_color() {
+        // Same screen cell reached twice (with junk in between) must get the
+        // same colour: hue depends on the position, not the stream offset.
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 0.0; // dx = 6°/col, dy = 0
+        opts.freq = 60.0;
+        opts.truecolor = true;
+        opts.pure = true;
+        opts.anchor = true;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let data: &[u8] = b"\x1b[2;4HX\x1b[1;1Hjunk\x1b[2;4HZ";
+        let mut r = Steps::new(data, 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        // (row 1, col 3) → hue 0 + 1·0 + 3·6 = 18° → (255, 76, 0)
+        let code18 = "\x1b[38;2;255;76;0m";
+        assert!(s.contains(&format!("{}X\x1b[39m", code18)), "X: {:?}", s);
+        assert!(s.contains(&format!("{}Z\x1b[39m", code18)), "Z: {:?}", s);
+        // home cell 'j' → hue 0° = pure red
+        assert!(s.contains("\x1b[38;2;255;0;0mj\x1b[39m"), "j: {:?}", s);
+    }
+
+    #[test]
+    fn anchor_relative_cursor_moves() {
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 0.0;
+        opts.freq = 60.0;
+        opts.truecolor = true;
+        opts.pure = true;
+        opts.anchor = true;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        // a@col0 (hue 0); printing advances to col1, C moves to col2, D back.
+        // b and c both land on col2 → identical hue (12° → 255;51;0).
+        let data: &[u8] = b"\x1b[1;1Ha\x1b[Cb\x1b[Dc";
+        let mut r = Steps::new(data, 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("\x1b[38;2;255;0;0ma\x1b[39m"), "a: {:?}", s);
+        let code12 = "\x1b[38;2;255;51;0m";
+        assert!(s.contains(&format!("{}b\x1b[39m", code12)), "b: {:?}", s);
+        assert!(s.contains(&format!("{}c\x1b[39m", code12)), "c: {:?}", s);
+    }
+
+    #[test]
+    fn anchor_row_phase_uses_dy() {
+        // angle 90 → hue advances with the row: (1,1) vs (2,1) differ by dy.
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 90.0; // dy = 6°/row, dx ≈ 0
+        opts.freq = 60.0;
+        opts.truecolor = true;
+        opts.pure = true;
+        opts.anchor = true;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let data: &[u8] = b"\x1b[1;1Ha\x1b[2;1Hb";
+        let mut r = Steps::new(data, 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("\x1b[38;2;255;0;0ma\x1b[39m"), "row1 a: {:?}", s);
+        assert!(s.contains("\x1b[38;2;255;25;0mb\x1b[39m"), "row2 b (hue 6): {:?}", s);
     }
 
     #[test]

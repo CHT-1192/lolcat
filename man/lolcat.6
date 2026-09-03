@@ -34,6 +34,11 @@ Stripe direction in degrees: 0 = up (vertical stripes), clockwise positive
 .br
 (default: 71.6).
 .TP
+\fB\-B\fP, \fB\-\-anchor\fP
+Color each screen cell by its fixed screen position, tracking cursor movement
+in the stream.  Full-screen TUIs that only redraw changed cells (btop, htop,
+...) therefore keep a stable color at every position instead of flickering.
+.TP
 \fB\-a\fP, \fB\-\-animate\fP
 Fade every line through an animation before printing the next one.
 .TP

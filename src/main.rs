@@ -8,6 +8,7 @@ mod lol;
 use std::io::{self, BufRead, BufWriter, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use clap::Parser;
 use lol::{Engine, Options};
@@ -32,7 +33,7 @@ const HELP_FOOTER: &str = concat!(
     "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
 );
 
-const HELP_OPTIONS: [(&str, &str); 12] = [
+const HELP_OPTIONS: [(&str, &str); 13] = [
     (
         "-F, --freq=<f>",
         "Hue cycles once every F grid units (default: 60)",
@@ -44,6 +45,10 @@ const HELP_OPTIONS: [(&str, &str); 12] = [
     (
         "-A, --angle=<f>",
         "Direction: 0 = up, clockwise positive (default: 71.6)",
+    ),
+    (
+        "-B, --anchor",
+        "Color by fixed screen position (stable for TUIs)",
     ),
     ("-a, --animate", "Enable psychedelics"),
     ("-d, --duration=<i>", "Animation duration (default: 12)"),
@@ -114,6 +119,10 @@ struct Cli {
     #[arg(short = 'P', long = "pure", default_value_t = false)]
     pure: bool,
 
+    /// Anchor colours to fixed screen positions (stable for full-screen TUIs)
+    #[arg(short = 'B', long = "anchor", default_value_t = false)]
+    anchor: bool,
+
     /// Force color even when stdout is not a tty
     #[arg(short = 'f', long = "force", default_value_t = false)]
     force: bool,
@@ -132,20 +141,37 @@ impl Drop for ResetGuard {
     fn drop(&mut self) {
         if self.tty {
             let mut out = io::stdout();
-            let _ = out.write_all(b"\x1b[m\x1b[?25h\x1b[?1;5;2004l");
+            let _ = out.write_all(TERM_RESET);
             let _ = out.flush();
         }
     }
 }
 
-fn install_ctrlc_handler(tty: bool) {
+/// Terminal reset emitted when lolcat itself has to restore the screen.
+const TERM_RESET: &[u8] = b"\x1b[?1049l\x1b[m\x1b[?25h\x1b[?1;5;2004l";
+
+/// SIGINT handling: when the upstream side is a pipe, the first Ctrl-C only
+/// flags the interrupt so lolcat keeps draining stdin — the producer got
+/// the same signal and its exit sequences (`ESC[?1049l`, `ESC[?25h`, …)
+/// must still be forwarded, otherwise full-screen TUIs would be left stuck
+/// in the alternate screen buffer. A second Ctrl-C forces an immediate exit.
+static INTERRUPTS: AtomicU8 = AtomicU8::new(0);
+static DRAIN_ON_INT: AtomicBool = AtomicBool::new(false);
+
+fn install_ctrlc_handler(tty: bool, drain: bool) {
+    DRAIN_ON_INT.store(drain, Ordering::Relaxed);
     let _ = ctrlc::set_handler(move || {
-        if tty {
-            let mut out = io::stdout();
-            let _ = out.write_all(b"\x1b[m\x1b[?25h\x1b[?1;5;2004l");
-            let _ = out.flush();
+        let n = INTERRUPTS.fetch_add(1, Ordering::Relaxed) + 1;
+        if n >= 2 || !DRAIN_ON_INT.load(Ordering::Relaxed) {
+            if tty {
+                let mut out = io::stdout();
+                let _ = out.write_all(TERM_RESET);
+                let _ = out.flush();
+            }
+            process::exit(130);
         }
-        process::exit(0);
+        // First interrupt while draining a pipe: keep reading so the
+        // upstream cleanup sequence still reaches the terminal before EOF.
     });
 }
 
@@ -228,6 +254,7 @@ fn cli_to_opts(cli: &Cli) -> Options {
     opts.invert = cli.invert;
     opts.truecolor = cli.truecolor;
     opts.pure = cli.pure;
+    opts.anchor = cli.anchor;
     opts.force = cli.force;
     opts
 }
@@ -238,7 +265,7 @@ fn main() {
     // `echo "help text" | lolcat <other flags>`)
     if let Some(opts) = check_help() {
         let stdout_tty = io::stdout().is_terminal();
-        install_ctrlc_handler(stdout_tty);
+        install_ctrlc_handler(stdout_tty, false);
         let text = help_text();
         let mut eng = Engine::new();
         let mut out = BufWriter::new(io::stdout());
@@ -260,7 +287,10 @@ fn main() {
     }
 
     let stdout_tty = io::stdout().is_terminal();
-    install_ctrlc_handler(stdout_tty);
+    // With piped stdin, Ctrl-C must let the upstream program's exit
+    // sequences drain (see install_ctrlc_handler); otherwise exit at once.
+    let drain_on_int = !io::stdin().is_terminal();
+    install_ctrlc_handler(stdout_tty, drain_on_int);
     let opts = cli_to_opts(&cli);
 
     let mut eng = Engine::new();
@@ -323,6 +353,7 @@ mod tests {
         assert!(!cli.invert);
         assert!(!cli.truecolor);
         assert!(!cli.pure);
+        assert!(!cli.anchor);
         assert!(!cli.force);
         assert_eq!(cli.files.len(), 1);
     }
@@ -331,7 +362,7 @@ mod tests {
     fn cli_custom_values() {
         let cli = Cli::parse_from([
             "lolcat", "-F", "30", "-S", "42", "-A", "90", "-a", "-d", "6", "-s", "30", "-i", "-t",
-            "-P", "-f", "file.txt",
+            "-P", "-B", "-f", "file.txt",
         ]);
         assert_eq!(cli.freq, 30.0);
         assert_eq!(cli.seed, 42);
@@ -342,6 +373,7 @@ mod tests {
         assert!(cli.invert);
         assert!(cli.truecolor);
         assert!(cli.pure);
+        assert!(cli.anchor);
         assert!(cli.force);
         assert_eq!(cli.files[0].to_string_lossy(), "file.txt");
     }
