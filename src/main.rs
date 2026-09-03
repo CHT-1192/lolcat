@@ -24,9 +24,11 @@ With no FILE, or when FILE is -, read standard input.\n\n";
 
 const HELP_FOOTER: &str = concat!(
     "\nExamples:\n",
-    "  lolcat f - g      Output f\'s contents, then stdin, then g\'s contents.\n",
-    "  lolcat            Copy standard input to standard output.\n",
-    "  fortune | lolcat  Display a rainbow cookie.\n",
+    "  echo \"hello\" | lolcat        Make everything a rainbow.\n",
+    "  fortune | cowsay | lolcat    Rainbow fortune cookie.\n",
+    "  cmatrix | lolcat             Matrix rain, in rainbow.\n",
+    "  pipes.sh -p 10 | lolcat      Animated rainbow pipes.\n",
+    "  btop | lolcat -B             Live system monitor, stable colours.\n",
     "\n",
     "Report lolcat bugs to <https://github.com/busyloop/lolcat/issues>\n",
     "lolcat home page: <https://github.com/busyloop/lolcat/>\n",

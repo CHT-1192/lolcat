@@ -76,23 +76,39 @@ Shows options summary.
 Typical combinations of \fBlolcat\fP include other programs that generate text:
 .br
 .br
-Large colorful words can be written like this:
+Make everything a rainbow:
 
 .IP
 .EX
-echo "KTHXBAI" | toilet | lolcat
+echo "hello world" | lolcat
 .EE
 .
-.P
 
-Cows are popular, come in all colors, and tell random epigrams:
+Rainbow fortune cookies are a classic:
 
 .IP
 .EX
 fortune | cowsay | lolcat \-a
 .EE
 .
-.P
+
+Full-screen animations work too (lolcat streams the output and preserves ANSI
+sequences):
+
+.IP
+.EX
+cmatrix | lolcat
+pipes.sh \-p 10 | lolcat
+.EE
+.
+
+For live system monitors use \-B so colours stay fixed to screen cells:
+
+.IP
+.EX
+btop | lolcat \-B
+.EE
+.
 
 .SH SEE ALSO
 .BR cat (1),

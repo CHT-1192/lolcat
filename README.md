@@ -69,6 +69,9 @@ By default colors use the original lolcat sine mapping (soft pastel);
 ```bash
 $ echo "hello world" | lolcat
 $ fortune | cowsay | lolcat -a
+$ cmatrix | lolcat               # matrix rain, in rainbow
+$ pipes.sh -p 10 | lolcat        # animated pipes, rainbow
+$ btop | lolcat -B               # live monitor; -B pins colours to screen cells
 $ lolcat -f file1.txt file2.txt
 $ lolcat -A 90 -t -i -F 30 README.md
 $ lolcat -P -A 0 -F 5   # pure hues, one rainbow cycle per 5 characters
