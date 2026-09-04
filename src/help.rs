@@ -51,7 +51,7 @@ const HELP_OPTIONS: [(&str, &str); 15] = [
         "-B, --anchor",
         "Color by fixed screen position (stable for TUIs)",
     ),
-    ("-C, --convert", "Convert original -p/-F and our -A/-F"),
+    ("-C, --convert", "Convert busyloop -p/-F and CHT-1192 -A/-F"),
     ("-a, --animate", "Enable psychedelics"),
     ("-d, --duration=<i>", "Animation duration (default: 3)"),
     ("-s, --speed=<f>", "Animation speed (default: 60.0)"),

@@ -15,15 +15,15 @@
 use std::io::{self, BufRead, Write};
 
 const USAGE: &str = "\
-Convert between original lolcat (-p spread -F freq) and ours (-A angle -F freq).
+Convert between busyloop/lolcat (-p spread -F freq) and CHT-1192/lolcat (-A angle -F freq).
 
-  lolcat -C -p 3 -F 0.1     original → ours
-  lolcat -C -A 71.6 -F 60   ours → original
+  lolcat -C -p 3 -F 0.1     busyloop → CHT-1192
+  lolcat -C -A 71.6 -F 60   CHT-1192 → busyloop
   lolcat -C                 interactive REPL (type 'q' to quit)
 
 REPL input is one of:
-  p <spread> F <freq>        original → ours
-  A <angle> F <freq>         ours → original
+  p <spread> F <freq>        busyloop → CHT-1192
+  A <angle> F <freq>         CHT-1192 → busyloop
 ";
 
 pub(crate) fn requested(args: &[String]) -> bool {
@@ -95,7 +95,7 @@ fn convert_flags(args: &[String]) -> Result<(), String> {
         let (a, fo) = orig_to_ours(p, f);
         println!("-A {}  -F {}", f32s(a), f32s(fo));
     } else {
-        return Err("use -p ... -F ... (original) or -A ... -F ... (ours)".into());
+        return Err("use -p ... -F ... (busyloop) or -A ... -F ... (CHT-1192)".into());
     }
     Ok(())
 }
