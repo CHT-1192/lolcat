@@ -8,6 +8,7 @@ license = "BSD-3-Clause"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
+libc = "0.2"
 rand = "0.9"
 
 [profile.release]

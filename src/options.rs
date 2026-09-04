@@ -18,6 +18,7 @@ pub(crate) struct Options {
     pub(crate) speed: f64,
     pub(crate) invert: bool,
     pub(crate) truecolor: bool,
+    pub(crate) keep: bool,
     pub(crate) force: bool,
 }
 
@@ -35,6 +36,7 @@ impl Options {
             speed: 20.0,
             invert: false,
             truecolor: false,
+            keep: true,
             force: false,
         }
     }

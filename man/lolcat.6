@@ -62,6 +62,12 @@ Enables 24-bit truecolor mode.
 Use a pure saturated hue wheel (hue 0 = red) instead of the classic
 pastel palette.
 .TP
+\fB\-K\fP, \fB\-\-keep\fP
+In the \fB\-a\fP animation, keep the input's own styling when a cell
+freezes: background colours (or the input foreground under \fB\-i\fP) such
+as fastfetch's palette blocks.  On by default; disable with
+\fB\-\-no\-keep\fP.
+.TP
 \fB\-f\fP, \fB\-\-force\fP
 Force color even when stdout is not a tty.
 .TP

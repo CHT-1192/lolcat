@@ -60,6 +60,15 @@ pub(crate) struct Cli {
     #[arg(short = 'B', long = "anchor", default_value_t = false)]
     anchor: bool,
 
+    /// Keep the input's own styling (background colours, bold, …; under -i
+    /// the input foreground) when the animation freezes a cell. Default: on.
+    #[arg(short = 'K', long = "keep", action = clap::ArgAction::SetTrue)]
+    keep: bool,
+
+    /// Turn `--keep` off.
+    #[arg(long = "no-keep", action = clap::ArgAction::SetTrue)]
+    no_keep: bool,
+
     /// Force color even when stdout is not a tty
     #[arg(short = 'f', long = "force", default_value_t = false)]
     force: bool,
@@ -105,6 +114,7 @@ pub(crate) fn cli_to_opts(cli: &Cli) -> Options {
     opts.truecolor = cli.truecolor;
     opts.pure = cli.pure;
     opts.anchor = cli.anchor;
+    opts.keep = !cli.no_keep || cli.keep;
     opts.force = cli.force;
     opts
 }

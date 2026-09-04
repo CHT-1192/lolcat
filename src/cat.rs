@@ -4,27 +4,28 @@
 //
 //! Stream colouring dispatcher. Non-animated input is painted incrementally
 //! in 4096-byte blocks (so newline-less producers like `cmatrix` work);
-//! with `--animate` each line is faded through its frames before the next
-//! one. With `--anchor` the hue is computed from the *screen position* of
-//! every character (tracked through the escape stream) instead of its
-//! position in the stream, so a full-screen TUI that redraws only changed
-//! cells keeps stable colours at every fixed location.
+//! with `--animate` (`-a`) a diagonal reveal animation runs (see
+//! `animate`). With `--anchor` the hue is computed from the *screen
+//! position* of every character (tracked through the escape stream)
+//! instead of its position in the stream, so a full-screen TUI that
+//! redraws only changed cells keeps stable colours at every fixed
+//! location.
 
 use std::io::{self, BufRead, Write};
 
 use crate::anchor::paint_anchored;
+use crate::animate::animate;
 use crate::engine::{set_mode, Engine};
 use crate::options::Options;
-use crate::render::println;
 use crate::stream::paint_stream;
 
 /// Colorize a stream of text. Non-animated input is painted incrementally in
 /// 4096-byte blocks (so newline-less producers like `cmatrix` work); with
-/// `--animate` each line is faded through its frames before the next one.
-/// With `--anchor` the hue is computed from the *screen position* of every
-/// character (tracked through the escape stream) instead of its position in
-/// the stream, so a full-screen TUI that redraws only changed cells keeps
-/// stable colours at every fixed location.
+/// `--animate` the reveal animation runs instead. With `--anchor` the hue is
+/// computed from the *screen position* of every character (tracked through
+/// the escape stream) instead of its position in the stream, so a full-screen
+/// TUI that redraws only changed cells keeps stable colours at every fixed
+/// location.
 pub(crate) fn cat<R: BufRead + ?Sized>(
     fd: &mut R,
     opts: &Options,
@@ -33,22 +34,7 @@ pub(crate) fn cat<R: BufRead + ?Sized>(
 ) -> io::Result<()> {
     eng.os = opts.os;
     if opts.animate && !opts.anchor {
-        out.write_all(b"\x1b[?25l")?;
-        let (_, dy) = opts.phase_step();
-        let mut buf = Vec::new();
-        loop {
-            buf.clear();
-            let n = fd.read_until(b'\n', &mut buf)?;
-            if n == 0 {
-                break;
-            }
-            eng.os += dy;
-            match std::str::from_utf8(&buf) {
-                Ok(s) => println(s, opts, eng, out)?,
-                Err(_) => out.write_all(&buf)?, // invalid UTF-8 → pass through
-            }
-        }
-        return Ok(());
+        return animate(fd, opts, eng, out);
     }
     if !eng.paint_init {
         set_mode(eng, opts.truecolor);

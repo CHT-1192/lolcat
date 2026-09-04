@@ -34,7 +34,7 @@ const HELP_FOOTER: &str = concat!(
     "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
 );
 
-const HELP_OPTIONS: [(&str, &str); 13] = [
+const HELP_OPTIONS: [(&str, &str); 14] = [
     (
         "-F, --freq=<f>",
         "Hue cycles once every F grid units (default: 60)",
@@ -59,6 +59,10 @@ const HELP_OPTIONS: [(&str, &str); 13] = [
     (
         "-P, --pure",
         "Pure saturated hue wheel (default: classic pastel)",
+    ),
+    (
+        "-K, --keep",
+        "Keep input colours in -a animation (default: on)",
     ),
     ("-f, --force", "Force color even when stdout is not a tty"),
     ("-V, --version", "Print version and exit"),

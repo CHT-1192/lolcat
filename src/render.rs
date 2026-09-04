@@ -8,9 +8,12 @@
 
 use std::io::{self, Write};
 
+#[cfg(test)]
 use crate::ansi::{expand_tabs, scan_pairs, strip_csi_ops};
 use crate::color::{color_for, write_sgr};
-use crate::engine::{set_mode, Engine};
+#[cfg(test)]
+use crate::engine::set_mode;
+use crate::engine::Engine;
 use crate::options::Options;
 
 /// Paint one complete character: colour code, character bytes, reset —
@@ -39,6 +42,7 @@ pub(crate) fn emit_char(
     out.write_all(&buf[..n])
 }
 
+#[cfg(test)]
 pub(crate) fn println(
     line: &str,
     opts: &Options,
@@ -63,6 +67,7 @@ pub(crate) fn println(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn println_plain(
     str: &str,
     opts: &Options,
@@ -102,6 +107,7 @@ pub(crate) fn println_plain(
     Ok(())
 }
 
+#[cfg(test)]
 fn println_ani(
     str: &mut String,
     opts: &Options,

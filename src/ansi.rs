@@ -9,6 +9,7 @@
 
 /// Scan a string into `(escape_run, char)` pairs — equivalent to Ruby's
 /// `str.scan(ANSI_ESCAPE)`.
+#[cfg(test)]
 pub(crate) fn scan_pairs(s: &str) -> Vec<(String, Option<char>)> {
     let chars: Vec<char> = s.chars().collect();
     let n = chars.len();
@@ -37,6 +38,7 @@ pub(crate) fn scan_pairs(s: &str) -> Vec<(String, Option<char>)> {
     pairs
 }
 
+#[cfg(test)]
 fn parse_escape(chars: &[char], i: usize) -> Option<(String, usize)> {
     let n = chars.len();
     if i + 1 >= n {
@@ -83,12 +85,14 @@ fn parse_escape(chars: &[char], i: usize) -> Option<(String, usize)> {
 }
 
 /// Expand tabs to eight spaces (matches the `expand` command's tab stops).
+#[cfg(test)]
 pub(crate) fn expand_tabs(s: &str) -> String {
     s.replace('\t', "        ")
 }
 
 /// Remove CSI cursor-erase operations (`ESC [ … @/J/K/P/X`) from a string,
 /// so an animated line keeps its length after a frame clears part of it.
+#[cfg(test)]
 pub(crate) fn strip_csi_ops(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let n = chars.len();

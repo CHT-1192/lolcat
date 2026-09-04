@@ -4,6 +4,7 @@
 //! lolcat — modern Rust port (clap-derive CLI, standard exits).
 
 mod anchor;
+mod animate;
 mod ansi;
 mod cat;
 mod cli;
