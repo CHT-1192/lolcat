@@ -266,6 +266,13 @@ pub fn animate<R: BufRead + ?Sized>(
         }
         animate_block(chunk, opts, eng, out)?;
     }
+    // The reveal parks the cursor at column 0 of the last row; when the
+    // input ended with a newline, move to a fresh line below it so the next
+    // output (shell prompt, …) does not overwrite the final row.
+    if raw.ends_with(b"\n") {
+        out.write_all(b"\n")?;
+        out.flush()?;
+    }
     Ok(())
 }
 
