@@ -39,6 +39,12 @@ Color each screen cell by its fixed screen position, tracking cursor movement
 in the stream.  Full-screen TUIs that only redraw changed cells (btop, htop,
 ...) therefore keep a stable color at every position instead of flickering.
 .TP
+\fB\-C\fP, \fB\-\-convert\fP
+Convert between the original lolcat's \fB\-p\fP/\fB\-F\fP and this port's
+\fB\-A\fP/\fB\-F\fP (float32 precision).  With no arguments it runs an
+interactive prompt; otherwise give either \fB\-p N -F N\fP (original) or
+\fB\-A N -F N\fP (ours).
+.TP
 \fB\-a\fP, \fB\-\-animate\fP
 Fade every line through an animation before printing the next one.
 .TP

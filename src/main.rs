@@ -9,6 +9,7 @@ mod ansi;
 mod cat;
 mod cli;
 mod color;
+mod convert;
 mod engine;
 mod help;
 mod lol;
@@ -33,6 +34,12 @@ fn file_error(file: &Path, msg: &str) -> ! {
 }
 
 fn main() {
+    let raw_args: Vec<String> = std::env::args().collect();
+    let wants_help = raw_args.iter().skip(1).any(|a| a == "-h" || a == "--help");
+    if !wants_help && convert::requested(&raw_args) {
+        convert::run(&raw_args);
+        process::exit(0);
+    }
     // --help/-h: strip it, re-parse the rest, and render help text
     // through the colorizer with those flags (equivalent to
     // `echo "help text" | lolcat <other flags>`)

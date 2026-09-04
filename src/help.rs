@@ -34,7 +34,7 @@ const HELP_FOOTER: &str = concat!(
     "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
 );
 
-const HELP_OPTIONS: [(&str, &str); 14] = [
+const HELP_OPTIONS: [(&str, &str); 15] = [
     (
         "-F, --freq=<f>",
         "Hue cycles once every F grid units (default: 60)",
@@ -51,6 +51,7 @@ const HELP_OPTIONS: [(&str, &str); 14] = [
         "-B, --anchor",
         "Color by fixed screen position (stable for TUIs)",
     ),
+    ("-C, --convert", "Convert original -p/-F and our -A/-F"),
     ("-a, --animate", "Enable psychedelics"),
     ("-d, --duration=<i>", "Animation duration (default: 3)"),
     ("-s, --speed=<f>", "Animation speed (default: 60.0)"),

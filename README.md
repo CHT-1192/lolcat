@@ -31,6 +31,7 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-S`, `--seed <i64>` | Rainbow seed: starting hue in degrees, 0 = random (default: 0) |
 | `-A`, `--angle <f64>` | Direction: 0 = up, clockwise positive (default: 71.6) |
 | `-B`, `--anchor` | Color by fixed screen position (stable for TUIs) |
+| `-C`, `--convert` | Convert original `-p`/`-F` and our `-A`/`-F` (no args: interactive) |
 | `-a`, `--animate` | Enable psychedelics |
 | `-d`, `--duration <u64>` | Animation duration (default: 3) |
 | `-s`, `--speed <f64>` | Animation speed (default: 60.0) |
