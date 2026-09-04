@@ -50,7 +50,24 @@ pub(crate) fn install_ctrlc_handler(tty: bool, drain: bool) {
     DRAIN_ON_INT.store(drain, Ordering::Relaxed);
     let _ = ctrlc::set_handler(move || {
         let n = INTERRUPTS.fetch_add(1, Ordering::Relaxed) + 1;
-        if n >= 2 || !DRAIN_ON_INT.load(Ordering::Relaxed) {
+        let draining = DRAIN_ON_INT.load(Ordering::Relaxed);
+        if !draining {
+            // Interactive use (stdin is a terminal): nothing is in the
+            // alternate screen, so reset WITHOUT `ESC[?1049l` — emitting it
+            // here made Terminal.app clear the viewport.
+            if tty {
+                let mut out = io::stdout();
+                let _ = out.write_all(END_RESET);
+                let _ = out.flush();
+            }
+            process::exit(130);
+        }
+        // Draining a pipe: the first Ctrl-C only flags the interrupt so the
+        // upstream program's exit sequences (ESC[?1049l, ...) still reach
+        // the terminal before EOF. A second one forces exit; there we may
+        // genuinely be inside the upstream's alternate screen, so TERM_RESET
+        // (which includes leaving it) is used.
+        if n >= 2 {
             if tty {
                 let mut out = io::stdout();
                 let _ = out.write_all(TERM_RESET);
@@ -58,7 +75,5 @@ pub(crate) fn install_ctrlc_handler(tty: bool, drain: bool) {
             }
             process::exit(130);
         }
-        // First interrupt while draining a pipe: keep reading so the
-        // upstream cleanup sequence still reaches the terminal before EOF.
     });
 }
