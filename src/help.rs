@@ -66,7 +66,7 @@ const HELP_OPTIONS: [(&str, &str); 15] = [
         "Keep input colours in -a animation (default: on)",
     ),
     ("-f, --force", "Force color even when stdout is not a tty"),
-    ("-V, --version", "Print version and exit"),
+    ("-v, --version", "Print version and exit"),
     ("-h, --help", "Show this message"),
 ];
 

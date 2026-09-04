@@ -16,6 +16,7 @@ use crate::options::Options;
     name = "lolcat",
     about,
     version = VERSION,
+    disable_version_flag = true,
     trailing_var_arg = true,
     allow_negative_numbers = true
 )]
@@ -72,6 +73,13 @@ pub(crate) struct Cli {
     /// Force color even when stdout is not a tty
     #[arg(short = 'f', long = "force", default_value_t = false)]
     force: bool,
+
+    /// Print version and exit (lowercase -v; hidden -V kept for compat)
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: Option<bool>,
+
+    #[arg(short = 'V', action = clap::ArgAction::Version, hide = true)]
+    version_cap: Option<bool>,
 
     /// Input files (use "-" for stdin)
     #[arg(default_value = "-")]
