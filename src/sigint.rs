@@ -54,10 +54,12 @@ pub(crate) fn install_ctrlc_handler(tty: bool, drain: bool) {
         if !draining {
             // Interactive use (stdin is a terminal): nothing is in the
             // alternate screen, so reset WITHOUT `ESC[?1049l` — emitting it
-            // here made Terminal.app clear the viewport.
+            // here made Terminal.app clear the viewport. A trailing newline
+            // stops zsh drawing its reversed end-of-output `%` marker.
             if tty {
                 let mut out = io::stdout();
                 let _ = out.write_all(END_RESET);
+                let _ = out.write_all(b"\n");
                 let _ = out.flush();
             }
             process::exit(130);
@@ -71,6 +73,7 @@ pub(crate) fn install_ctrlc_handler(tty: bool, drain: bool) {
             if tty {
                 let mut out = io::stdout();
                 let _ = out.write_all(TERM_RESET);
+                let _ = out.write_all(b"\n");
                 let _ = out.flush();
             }
             process::exit(130);
