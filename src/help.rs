@@ -81,6 +81,12 @@ pub(crate) fn help_text() -> String {
 
 /// If raw args contain -h/--help (incl. bundled like -ah), strip the
 /// help flag(s) and parse the rest with clap. Returns the parsed options
+/// Rainbow parameters the original Ruby lolcat hard-codes for its own help
+/// screen (freq 0.3 / spread 8.0). Measured equivalent in our convention:
+/// 2.15°/column, 20.6°/line → angle 84.1°, cycle length 17.4 units.
+const HELP_ANGLE: f64 = 84.1;
+const HELP_FREQ: f64 = 17.4;
+
 /// so help can be rendered through the colorizer with those flags applied.
 /// `-th` → truecolor help, `-ah` → animate help, etc.
 pub(crate) fn check_help() -> Option<Options> {
@@ -115,5 +121,24 @@ pub(crate) fn check_help() -> Option<Options> {
         eprintln!("Error: argument {}.", msg);
         process::exit(2);
     }
-    Some(cli_to_opts(&cli))
+    let mut opts = cli_to_opts(&cli);
+
+    // The original Ruby lolcat renders its help with hard-coded rainbow
+    // parameters (freq 0.3 / spread 8.0) that are denser and more slanted
+    // than its normal defaults, so its --help rainbow looks different from
+    // ours. Unless the user passed -A/-F explicitly, use the equivalent of
+    // those hard-coded values (measured: 2.15°/col, 20.6°/line) so the help
+    // rainbow matches the original.
+    let overridden =
+        filtered.iter().skip(1).any(|a| {
+            a == "-A" || a == "--angle" || a.starts_with("--angle=") || a.starts_with("-A")
+        }) || filtered
+            .iter()
+            .skip(1)
+            .any(|a| a == "-F" || a == "--freq" || a.starts_with("--freq=") || a.starts_with("-F"));
+    if !overridden {
+        opts.angle = HELP_ANGLE;
+        opts.freq = HELP_FREQ;
+    }
+    Some(opts)
 }
