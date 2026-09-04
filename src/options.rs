@@ -32,7 +32,7 @@ impl Options {
             pure: false,
             anchor: false,
             animate: false,
-            duration: 2,
+            duration: 3,
             speed: 60.0,
             invert: false,
             truecolor: false,

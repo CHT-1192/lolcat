@@ -37,7 +37,7 @@ pub(crate) struct Cli {
     animate: bool,
 
     /// Animation duration (number of frames per line)
-    #[arg(short = 'd', long = "duration", default_value = "2")]
+    #[arg(short = 'd', long = "duration", default_value = "3")]
     duration: u64,
 
     /// Animation speed (frames per second)
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(cli.seed, 0);
         assert_eq!(cli.angle, 71.6);
         assert!(!cli.animate);
-        assert_eq!(cli.duration, 2);
+        assert_eq!(cli.duration, 3);
         assert_eq!(cli.speed, 60.0);
         assert!(!cli.invert);
         assert!(!cli.truecolor);
