@@ -32,8 +32,8 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-A`, `--angle <f64>` | Direction: 0 = up, clockwise positive (default: 71.6) |
 | `-B`, `--anchor` | Color by fixed screen position (stable for TUIs) |
 | `-a`, `--animate` | Enable psychedelics |
-| `-d`, `--duration <u64>` | Animation duration (default: 12) |
-| `-s`, `--speed <f64>` | Animation speed (default: 20.0) |
+| `-d`, `--duration <u64>` | Animation duration (default: 2) |
+| `-s`, `--speed <f64>` | Animation speed (default: 60.0) |
 | `-i`, `--invert` | Invert fg and bg |
 | `-t`, `--truecolor` | 24-bit truecolor mode |
 | `-P`, `--pure` | Pure saturated hue wheel (default: classic pastel) |

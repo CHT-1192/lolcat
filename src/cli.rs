@@ -37,11 +37,11 @@ pub(crate) struct Cli {
     animate: bool,
 
     /// Animation duration (number of frames per line)
-    #[arg(short = 'd', long = "duration", default_value = "12")]
+    #[arg(short = 'd', long = "duration", default_value = "2")]
     duration: u64,
 
     /// Animation speed (frames per second)
-    #[arg(short = 's', long = "speed", default_value = "20.0")]
+    #[arg(short = 's', long = "speed", default_value = "60.0")]
     speed: f64,
 
     /// Invert foreground and background colors
@@ -130,8 +130,8 @@ mod tests {
         assert_eq!(cli.seed, 0);
         assert_eq!(cli.angle, 71.6);
         assert!(!cli.animate);
-        assert_eq!(cli.duration, 12);
-        assert_eq!(cli.speed, 20.0);
+        assert_eq!(cli.duration, 2);
+        assert_eq!(cli.speed, 60.0);
         assert!(!cli.invert);
         assert!(!cli.truecolor);
         assert!(!cli.pure);

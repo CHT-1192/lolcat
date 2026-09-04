@@ -52,8 +52,8 @@ const HELP_OPTIONS: [(&str, &str); 14] = [
         "Color by fixed screen position (stable for TUIs)",
     ),
     ("-a, --animate", "Enable psychedelics"),
-    ("-d, --duration=<i>", "Animation duration (default: 12)"),
-    ("-s, --speed=<f>", "Animation speed (default: 20.0)"),
+    ("-d, --duration=<i>", "Animation duration (default: 2)"),
+    ("-s, --speed=<f>", "Animation speed (default: 60.0)"),
     ("-i, --invert", "Invert fg and bg"),
     ("-t, --truecolor", "24-bit (truecolor)"),
     (
