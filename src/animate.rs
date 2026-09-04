@@ -294,6 +294,11 @@ fn animate_block(
             out.write_all(b"\n")?;
         }
     }
+    // The cursor is now at the end of the last (blank) row; park it at
+    // column 0 — every cell write below assumes it starts from there, and
+    // without this the very first write would land a stray glyph a whole
+    // row-width to the right (the "ghost character").
+    out.write_all(b"\r")?;
     out.flush()?;
 
     let cost = char_cost(opts.angle);
