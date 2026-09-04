@@ -27,7 +27,7 @@ const HELP_FOOTER: &str = concat!(
     "  fortune | cowsay | lolcat    Rainbow fortune cookie.\n",
     "  cmatrix | lolcat             Matrix rain, in rainbow.\n",
     "  pipes.sh -p 10 | lolcat      Animated rainbow pipes.\n",
-    "  htop | lolcat -B             Live process monitor, stable colours.\n",
+    "  btop | lolcat -B             Live system monitor, stable colours.\n",
     "\n",
     "Report lolcat bugs to <https://github.com/busyloop/lolcat/issues>\n",
     "lolcat home page: <https://github.com/busyloop/lolcat/>\n",
