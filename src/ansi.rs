@@ -186,7 +186,7 @@ pub(crate) fn utf8_char_len(b: u8) -> Option<usize> {
 /// byte). Missing parameters become `None`; each opcode applies its own
 /// default. Private markers (`?`, `>`, `<`, `=`) and intermediate bytes are
 /// skipped.
-fn csi_params(seq: &[u8]) -> Vec<Option<u64>> {
+pub(crate) fn csi_params(seq: &[u8]) -> Vec<Option<u64>> {
     let mut params = Vec::new();
     let mut cur: Option<u64> = None;
     for &b in &seq[2..seq.len().saturating_sub(1)] {

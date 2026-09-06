@@ -141,9 +141,28 @@ fn parse_line(line: &[u8], keep: bool) -> Row {
             match escape_len(&line[i..]) {
                 Some(l) => {
                     let seq = &line[i..i + l];
-                    // Only SGR sequences (…m) style the following cells.
-                    if keep && seq.len() >= 2 && seq[seq.len() - 1] == b'm' {
+                    let final_byte = seq[seq.len() - 1];
+                    if keep && seq.len() >= 2 && final_byte == b'm' {
+                        // SGR: style the following cells.
                         fmt = seq.to_vec();
+                    } else if seq.len() >= 2 && seq[1] == b'[' {
+                        // Column positioning used for alignment (fastfetch
+                        // pads with `ESC[47G`, `ESC[nC`, …). Translate it
+                        // into real space cells so the final text keeps its
+                        // column layout after the escapes are gone.
+                        let params = crate::ansi::csi_params(seq);
+                        let p0 = |d: usize| {
+                            params.first().copied().flatten().unwrap_or(d as u64) as usize
+                        };
+                        let pad = match final_byte {
+                            b'G' => p0(1).saturating_sub(1).saturating_sub(row.chars.len()),
+                            b'C' => p0(1),
+                            _ => 0,
+                        };
+                        for _ in 0..pad {
+                            row.chars.push(' ');
+                            row.fmts.push(fmt.clone());
+                        }
                     }
                     i += l;
                 }
@@ -456,6 +475,17 @@ mod tests {
         assert_eq!(row.fmts[3], b"\x1b[42m".to_vec()); // D
         assert_eq!(row.fmts[5], b"\x1b[42m".to_vec()); // F
         assert_eq!(row.chars.len(), row.fmts.len());
+    }
+
+    #[test]
+    fn parse_line_abs_column_padding() {
+        // fastfetch pads with ESC[47G; the value must land after 46 cells.
+        let row = parse_line(b"CPU: \x1b[47GApple", true);
+        // 5 lead + 41 pad (target col 47 is 1-based → index 46) + 5 value
+        assert_eq!(row.chars.len(), 51);
+        assert_eq!(row.chars[0..5].iter().collect::<String>(), "CPU: ");
+        assert_eq!(row.chars[46], 'A');
+        assert!(row.chars[5..46].iter().all(|&c| c == ' '));
     }
 
     #[test]
