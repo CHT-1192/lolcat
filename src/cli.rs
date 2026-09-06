@@ -87,12 +87,6 @@ pub(crate) struct Cli {
 }
 
 /// Range validation for numeric options; returns the offending message.
-/// Animation angle sector: from "down-right but not too vertical" to
-/// "straight down". 18.4° = 90° - default angle (71.6°); the opposite
-/// sector is 180° away.
-const ANIM_ANGLE_MIN: f64 = 18.4;
-const ANIM_ANGLE_MAX: f64 = 90.0;
-
 pub(crate) fn validate(cli: &Cli) -> Result<(), String> {
     if !cli.freq.is_finite() || cli.freq <= 0.0 {
         return Err("--freq must be a finite number > 0".into());
@@ -105,20 +99,6 @@ pub(crate) fn validate(cli: &Cli) -> Result<(), String> {
     }
     if !cli.angle.is_finite() || !(-360.0..=360.0).contains(&cli.angle) {
         return Err("--angle must be a finite number between -360 and 360".into());
-    }
-    // The reveal animation only makes sense for directions from "down-right"
-    // (but not too vertical) to "straight down": 18.4 = 90° - default 71.6°,
-    // plus the opposite sector 180° away. Enforce it whenever -a is on.
-    if cli.animate {
-        let a = cli.angle.rem_euclid(360.0);
-        let ok = (ANIM_ANGLE_MIN..=ANIM_ANGLE_MAX).contains(&a)
-            || (ANIM_ANGLE_MIN + 180.0..=ANIM_ANGLE_MAX + 180.0).contains(&a);
-        if !ok {
-            return Err(
-                "--angle out of range for -a: use 18.4..=90 or 198.4..=270 (or ±360 equivalents)"
-                    .into(),
-            );
-        }
     }
     Ok(())
 }
@@ -223,22 +203,14 @@ mod tests {
         assert!(ok(Box::new(|c| c.angle = -360.1)).is_err());
         assert!(ok(Box::new(|c| c.angle = f64::NAN)).is_err());
         assert!(ok(Box::new(|c| c.angle = f64::INFINITY)).is_err());
-        // -a restricts the angle to 18.4..=90 / 198.4..=270 (±360).
+        // -a itself does not reject any angle: unsupported ones degrade to
+        // plain colouring at dispatch time.
         let anim = |a: f64| {
             let cli = Cli::parse_from(["lolcat", "-a", "-A", &a.to_string()]);
             validate(&cli)
         };
         assert!(anim(45.0).is_ok());
-        assert!(anim(71.6).is_ok());
-        assert!(anim(90.0).is_ok());
-        assert!(anim(225.0).is_ok());
-        assert!(anim(-315.0).is_ok()); // ≡ 45
-        assert!(anim(198.4).is_ok());
-        assert!(anim(0.0).is_err());
-        assert!(anim(10.0).is_err());
-        assert!(anim(100.0).is_err());
-        assert!(anim(180.0).is_err());
-        assert!(anim(270.1).is_err());
-        assert!(anim(-45.0).is_err()); // ≡ 315
+        assert!(anim(0.0).is_ok());
+        assert!(anim(-45.0).is_ok());
     }
 }

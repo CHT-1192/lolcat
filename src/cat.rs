@@ -33,9 +33,11 @@ pub(crate) fn cat<R: BufRead + ?Sized>(
     out: &mut dyn Write,
 ) -> io::Result<()> {
     eng.os = opts.os;
-    if opts.animate && !opts.anchor {
+    if opts.animate && !opts.anchor && crate::animate::angle_supported(opts.angle) {
         return animate(fd, opts, eng, out);
     }
+    // Any other animation-unfriendly situation (unsupported -A sector,
+    // non-tty, oversized lines, ...) degrades to plain colouring below.
     if !eng.paint_init {
         set_mode(eng, opts.truecolor);
     }

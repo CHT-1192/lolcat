@@ -64,6 +64,20 @@ fn terminal_size() -> Option<(usize, usize)> {
     None
 }
 
+/// Animation angle sector: directions from "down-right (but not too
+/// vertical)" to "straight down". 18.4° = 90° - default angle (71.6°);
+/// the opposite sector is 180° away.
+const ANIM_ANGLE_MIN: f64 = 18.4;
+const ANIM_ANGLE_MAX: f64 = 90.0;
+
+/// Whether `-a` reveal geometry supports the given angle. Unsupported
+/// angles degrade to plain (non-animated) colouring instead of failing.
+pub(crate) fn angle_supported(angle: f64) -> bool {
+    let a = angle.rem_euclid(360.0);
+    (ANIM_ANGLE_MIN..=ANIM_ANGLE_MAX).contains(&a)
+        || (ANIM_ANGLE_MIN + 180.0..=ANIM_ANGLE_MAX + 180.0).contains(&a)
+}
+
 /// Random printable glyph (0x21..=0x7e, no space).
 fn random_glyph() -> u8 {
     (33 + rand::random::<u8>() % 94) as u8
@@ -378,6 +392,24 @@ fn animate_block(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn angle_sector() {
+        assert!(angle_supported(45.0));
+        assert!(angle_supported(71.6));
+        assert!(angle_supported(90.0));
+        assert!(angle_supported(198.4));
+        assert!(angle_supported(225.0));
+        assert!(angle_supported(270.0));
+        assert!(angle_supported(-315.0)); // ≡ 45
+        assert!(angle_supported(-90.0)); // ≡ 270
+        assert!(!angle_supported(0.0));
+        assert!(!angle_supported(10.0));
+        assert!(!angle_supported(100.0));
+        assert!(!angle_supported(180.0));
+        assert!(!angle_supported(270.1));
+        assert!(!angle_supported(-45.0)); // ≡ 315
+    }
 
     #[test]
     fn char_cost_anchors() {
