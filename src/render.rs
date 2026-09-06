@@ -140,6 +140,10 @@ mod tests {
     use super::*;
 
     fn render(body: &str, opts: &Options) -> Vec<u8> {
+        // The expected bytes below assume the 256-colour palette. Ignore an
+        // ambient COLORTERM=truecolor/24bit (common on desktops) that would
+        // otherwise switch the engine to truecolor codes and break them.
+        std::env::remove_var("COLORTERM");
         let mut eng = Engine::new();
         eng.os = opts.os;
         let mut out = Vec::new();

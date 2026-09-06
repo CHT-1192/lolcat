@@ -35,9 +35,11 @@ use crate::stream::paint_stream;
 
 /// Ask the terminal for its size (rows, columns). The block path may only
 /// run when the whole text fits: no more lines than the height and every
-/// line strictly narrower than the width. When the size cannot be queried
-/// (stdout is not a terminal) we take the per-line path, which needs no
-/// geometry.
+/// line strictly narrower than the width. When stdout is not a terminal we
+/// take the per-line path, which needs no geometry.
+///
+/// The size is sampled once per run (no SIGWINCH handling): the reveal
+/// geometry is fixed for the whole input.
 #[cfg(unix)]
 fn terminal_size() -> Option<(usize, usize)> {
     #[repr(C)]
@@ -52,11 +54,25 @@ fn terminal_size() -> Option<(usize, usize)> {
         let mut w = std::mem::MaybeUninit::<WinSize>::uninit();
         if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, w.as_mut_ptr()) == 0 {
             let w = w.assume_init();
-            Some((w.rows as usize, w.cols as usize))
-        } else {
-            None
+            let (r, c) = (w.rows as usize, w.cols as usize);
+            if r > 0 && c > 0 {
+                return Some((r, c));
+            }
         }
     }
+    // ioctl failed or reported a zero size (e.g. a pty that was never
+    // resized): fall back to $LINES/$COLUMNS, but only when stdout is still
+    // a terminal — animation into a non-tty never makes sense.
+    if unsafe { libc::isatty(libc::STDOUT_FILENO) } != 1 {
+        return None;
+    }
+    let env = |k: &str| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+    };
+    Some((env("LINES").unwrap_or(24), env("COLUMNS").unwrap_or(80)))
 }
 
 #[cfg(not(unix))]
@@ -124,6 +140,45 @@ impl Row {
     }
 }
 
+/// A C0 control byte that the row/column animation model cannot represent
+/// faithfully: BEL, BS, VT/FF (which move the cursor inside a row), NUL, an
+/// interior `\r` (overwrite), etc. Tabs are kept as literal glyph cells,
+/// `ESC` starts escape sequences consumed by `parse_line`, and `\n`/`\r`
+/// never appear here — rows are split on `\n` and CRLF endings are folded
+/// by [`split_lines`] first.
+fn is_unrepresentable_c0(b: u8) -> bool {
+    b < 0x20 && b != b'\t' && b != 0x1b
+}
+
+/// Split raw input into rows on `\n`, folding CRLF endings: a `\r` directly
+/// before the row end only rewinds to column 0, which the newline already
+/// implies, so it is dropped (otherwise every CRLF line would carry a
+/// phantom column and could trip the width gate). Rows that still contain
+/// an unrepresentable control byte make the whole input `None`, so the
+/// caller can degrade to the plain painter, which passes control bytes
+/// through raw. The empty row left by a trailing `\n` is kept for the
+/// caller to pop.
+fn split_lines(raw: &[u8]) -> Option<Vec<&[u8]>> {
+    let mut bad = false;
+    let rows: Vec<&[u8]> = raw
+        .split(|&b| b == b'\n')
+        .map(|mut line| {
+            while line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
+            }
+            if line.iter().any(|&b| is_unrepresentable_c0(b)) {
+                bad = true;
+            }
+            line
+        })
+        .collect();
+    if bad {
+        None
+    } else {
+        Some(rows)
+    }
+}
+
 /// Parse one raw input line into a `Row`: escape sequences are dropped, but
 /// each SGR (`ESC [ … m`) is remembered and attached to every following
 /// visible character as its formatting prefix (attributes accumulate until
@@ -166,7 +221,17 @@ fn parse_line(line: &[u8], keep: bool) -> Row {
                     }
                     i += l;
                 }
-                None => i += 1,
+                None => {
+                    // Truncated escape (no final byte before the row ends):
+                    // a terminal discards it together with its trailing
+                    // parameter bytes, so do we. Resume at the next ESC if
+                    // one appears later in the row, else the row is done —
+                    // the incomplete tail must not leak out as "[31" text.
+                    match line[i + 1..].iter().position(|&x| x == 0x1b) {
+                        Some(k) => i += 1 + k,
+                        None => i = n,
+                    }
+                }
             }
             continue;
         }
@@ -275,15 +340,31 @@ pub fn animate<R: BufRead + ?Sized>(
     // survives underneath the reveal's own foreground colour. The plain
     // (non-animated) fallback keeps the raw bytes: `paint_stream` passes
     // ANSI through correctly.
-    let mut all: Vec<Row> = raw
-        .split(|&b| b == b'\n')
+    //
+    // CRLF endings are folded first, and any remaining control byte that
+    // the cell model cannot render (BEL, BS, VT/FF, an interior CR, NUL, …)
+    // degrades the whole input to plain colouring — an animation that
+    // flattened such a row would fabricate text that was never on screen.
+    let lines = match split_lines(&raw) {
+        Some(lines) => lines,
+        None => {
+            let mut input: &[u8] = &raw;
+            return paint_stream(&mut input, opts, eng, out);
+        }
+    };
+    let mut all: Vec<Row> = lines
+        .iter()
         .map(|line| parse_line(line, opts.keep))
         .collect();
     if all.last().map(|l| l.chars.is_empty()) == Some(true) {
         all.pop(); // trailing newline
     }
-    if all.is_empty() {
-        return Ok(());
+    // Blank-only input (just newlines): there is nothing to reveal, and an
+    // empty reveal would not even print the blank lines. Paint it plainly,
+    // exactly like a non-animated run.
+    if all.iter().all(|l| l.chars.is_empty()) {
+        let mut input: &[u8] = &raw;
+        return paint_stream(&mut input, opts, eng, out);
     }
     // A line at least as wide as the terminal would wrap: no geometry.
     let too_wide = all.iter().any(|l| l.chars.len() >= cols);
@@ -299,13 +380,22 @@ pub fn animate<R: BufRead + ?Sized>(
         }
         animate_block(chunk, opts, eng, out)?;
     }
-    // The reveal parks the cursor at column 0 of the last row; when the
+    // The reveal parks the cursor at column 0 of the last row. When the
     // input ended with a newline, move to a fresh line below it so the next
-    // output (shell prompt, …) does not overwrite the final row.
+    // output (shell prompt, …) does not overwrite the final row. Without a
+    // trailing newline, mirror plain lolcat, which leaves the cursor just
+    // past the final character: move right by the last row's cell count.
     if raw.ends_with(b"\n") {
         out.write_all(b"\n")?;
-        out.flush()?;
+    } else if let Some(last) = all.last() {
+        let w = last.chars.len();
+        if w > 0 {
+            out.write_all(b"\x1b[")?;
+            out.write_all(w.to_string().as_bytes())?;
+            out.write_all(b"C")?;
+        }
     }
+    out.flush()?;
     Ok(())
 }
 
@@ -377,6 +467,13 @@ fn animate_block(
         if step > 0 {
             for &(r, c) in &by_step[step - 1] {
                 write_final(out, r, c)?;
+            }
+            if d == 1 {
+                // `-d 1` has no intra-band dwell, so the step boundary
+                // itself must advance at `-s` fps — otherwise the whole
+                // reveal would run as fast as the terminal can write and
+                // `-s` would have no effect.
+                thread::sleep(frame);
             }
         }
         // Dwell: flicker the current band for `d` frames.
@@ -494,5 +591,64 @@ mod tests {
         let s: String = row.chars.iter().collect();
         assert_eq!(s, "ABCD");
         assert!(row.fmts.iter().all(|f| f.is_empty()));
+    }
+
+    #[test]
+    fn parse_line_truncated_escape_tail_dropped() {
+        // A truncated escape (no final byte before the row end) is
+        // discarded by terminals; it must not leak out as "[31" text.
+        for tail in [&b"\x1b[31"[..], &b"\x1b["[..], &b"\x1b"[..]] {
+            let mut line = b"ab".to_vec();
+            line.extend_from_slice(tail);
+            let row = parse_line(&line, true);
+            let s: String = row.chars.iter().collect();
+            assert_eq!(s, "ab", "tail {:?}", tail);
+        }
+        // An incomplete sequence followed by a later complete one: parsing
+        // resumes at the next ESC, which is handled normally.
+        let row = parse_line(b"ab\x1b[31\x1b[32mX", true);
+        let s: String = row.chars.iter().collect();
+        assert_eq!(s, "abX");
+        assert_eq!(row.fmts.last().unwrap(), b"\x1b[32m");
+    }
+
+    #[test]
+    fn split_lines_folds_crlf() {
+        // CRLF endings collapse to the content row (no phantom CR column).
+        // A trailing newline still leaves a final empty row for the caller.
+        assert_eq!(
+            split_lines(b"a\r\nb\r\n").unwrap(),
+            vec![b"a".as_slice(), b"b".as_slice(), b"".as_slice()]
+        );
+        // A lone trailing CR (no newline) is only a no-op column reset.
+        assert_eq!(split_lines(b"ab\r").unwrap(), vec![b"ab".as_slice()]);
+        // Trailing newline leaves a final empty row for the caller to pop.
+        assert_eq!(
+            split_lines(b"x\n").unwrap(),
+            vec![b"x".as_slice(), b"".as_slice()]
+        );
+    }
+
+    #[test]
+    fn split_lines_rejects_interior_controls() {
+        // Interior CR means overwrite semantics: unrepresentable.
+        assert!(split_lines(b"a\rb\n").is_none());
+        // BEL/BS/VT/FF/NUL and the rest of C0 degrade the input…
+        for c in [0x00u8, 0x07, 0x08, 0x0b, 0x0c, 0x0e, 0x1f] {
+            assert!(
+                split_lines(&[b'a', c, b'b', b'\n']).is_none(),
+                "C0 {:02x} not rejected",
+                c
+            );
+        }
+        // …while tabs and escape sequences are fine.
+        assert_eq!(
+            split_lines(b"a\tb\n").unwrap(),
+            vec![b"a\tb".as_slice(), b"".as_slice()]
+        );
+        assert_eq!(
+            split_lines(b"\x1b[40mAB\x1b(Bc\n").unwrap(),
+            vec![b"\x1b[40mAB\x1b(Bc".as_slice(), b"".as_slice()]
+        );
     }
 }

@@ -49,7 +49,7 @@ const HELP_OPTIONS: [(&str, &str); 15] = [
     ),
     (
         "-B, --anchor",
-        "Color by fixed screen position (stable for TUIs)",
+        "Color by fixed screen position (overrides -a)",
     ),
     ("-C, --convert", "Convert busyloop -p/-F and CHT-1192 -A/-F"),
     ("-a, --animate", "Enable psychedelics"),

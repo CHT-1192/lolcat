@@ -30,7 +30,7 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-F`, `--freq <f64>` | Hue cycles once every F grid units (default: 60) |
 | `-S`, `--seed <i64>` | Rainbow seed: starting hue in degrees, 0 = random (default: 0) |
 | `-A`, `--angle <f64>` | Direction: 0 = up, clockwise positive (default: 71.6) |
-| `-B`, `--anchor` | Color by fixed screen position (stable for TUIs) |
+| `-B`, `--anchor` | Color by fixed screen position (overrides `-a`) |
 | `-C`, `--convert` | Convert busyloop/lolcat `-p`/`-F` and CHT-1192/lolcat `-A`/`-F` (no args: interactive) |
 | `-a`, `--animate` | Enable psychedelics |
 | `-d`, `--duration <u64>` | Animation duration (default: 3) |
@@ -49,7 +49,8 @@ With `-a` (animation) the direction is intended for the "down-right but
 not too vertical" through "straight down" sector (`-A` within `18.4..=90`
 or `198.4..=270`, ±360 equivalents). Any other angle — like any other
 animation-unfriendly situation — degrades to plain colouring instead of
-animating.
+animating. `-B` takes precedence over `-a`: `lolcat -a -B` colours by
+fixed screen position without animating.
 
 `--angle` sets the stripe direction: `0` = up (vertical stripes), `90` = right
 (horizontal stripes), `180` = down, `270` = left; negative angles go
