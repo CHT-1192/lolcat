@@ -45,6 +45,10 @@ With no FILE, or when FILE is `-`, read standard input.
 
 ### Direction
 
+With `-a` (animation) the direction is restricted to the "down-right but
+not too vertical" through "straight down" sector: `-A` must be within
+`18.4..=90` or `198.4..=270` (or their ±360 equivalents).
+
 `--angle` sets the stripe direction: `0` = up (vertical stripes), `90` = right
 (horizontal stripes), `180` = down, `270` = left; negative angles go
 counterclockwise. Values must be finite and within `-360..=360` (`-360`/`360`

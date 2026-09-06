@@ -32,7 +32,9 @@ Starting hue in degrees (mod 360); 0 means random.
 Stripe direction in degrees: 0 = up (vertical stripes), clockwise positive
 (90 = right = horizontal stripes); finite values within -360..360.
 .br
-(default: 71.6).
+(default: 71.6).  With \fB\-a\fP the angle is restricted to the
+"down-right (but not too vertical)" through "straight down" sector:
+18.4..=90 or 198.4..=270 (or their ±360 equivalents).
 .TP
 \fB\-B\fP, \fB\-\-anchor\fP
 Color each screen cell by its fixed screen position, tracking cursor movement
