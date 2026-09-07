@@ -1,7 +1,7 @@
 # Config file design (lolcat.config.jsonc)
 
-Status: **planned** — not implemented. This document fixes the structure
-before any code is written.
+Status: **implemented** (see `src/config.rs`). This document fixes the
+structure; follow it when changing the module.
 
 ## 1. Goal
 

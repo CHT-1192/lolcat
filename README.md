@@ -89,10 +89,19 @@ $ lolcat -A 180         # stripes reversed
 
 ## Configuration
 
-**Planned** — a `lolcat.config.jsonc` file can supply defaults for the
-valued options (`freq`/`seed`/`angle`/`duration`/`speed`); command-line
-arguments always win. See [docs/config.md](docs/config.md) for the full
-design (discovery, JSONC format, error handling).
+`lolcat` reads a JSONC config file for defaults of the valued options
+(`freq`/`seed`/`angle`/`duration`/`speed`); command-line arguments always
+win. Lookup order — first file found wins:
+
+1. `$LOLCAT_CONFIG` (explicit path)
+2. `$XDG_CONFIG_HOME/lolcat/config.jsonc` (default `~/.config/lolcat/`; on
+   Windows `%APPDATA%\lolcat\config.jsonc`)
+3. `lolcat.config.jsonc` next to the executable (portable)
+
+If no file exists anywhere, one with the full default set is generated
+next to the executable (or in the user config dir when that is not
+writable). Bad input is silent — a syntax error ignores the file, a bad
+key is skipped. See [docs/config.md](docs/config.md) for details.
 
 ## License
 

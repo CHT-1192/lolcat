@@ -10,6 +10,7 @@ use std::process;
 use clap::Parser;
 
 use crate::cli::{cli_to_opts, validate, Cli};
+use crate::config::ConfigDefaults;
 use crate::options::Options;
 
 pub(crate) const VERSION: &str = "100.0.2 (c)2011 moe@busyloop.net";
@@ -90,7 +91,7 @@ const HELP_FREQ: f64 = 17.4;
 
 /// so help can be rendered through the colorizer with those flags applied.
 /// `-th` → truecolor help, `-ah` → animate help, etc.
-pub(crate) fn check_help() -> Option<Options> {
+pub(crate) fn check_help(cfg: &ConfigDefaults) -> Option<Options> {
     let raw: Vec<String> = std::env::args().collect();
     let mut has_help = false;
     let mut filtered: Vec<String> = vec![raw[0].clone()]; // keep bin name
@@ -122,22 +123,23 @@ pub(crate) fn check_help() -> Option<Options> {
         eprintln!("Error: argument {}.", msg);
         process::exit(2);
     }
-    let mut opts = cli_to_opts(&cli);
+    let mut opts = cli_to_opts(&cli, cfg);
 
     // The original Ruby lolcat renders its help with hard-coded rainbow
     // parameters (freq 0.3 / spread 8.0) that are denser and more slanted
     // than its normal defaults, so its --help rainbow looks different from
-    // ours. Unless the user passed -A/-F explicitly, use the equivalent of
-    // those hard-coded values (measured: 2.15°/col, 20.6°/line) so the help
-    // rainbow matches the original.
-    let overridden =
+    // ours. Unless the user chose differently — an explicit -A/-F on the
+    // command line, or a freq/angle in the config file, both count as a
+    // choice — use the equivalent of those hard-coded values (measured:
+    // 2.15°/col, 20.6°/line) so the help rainbow matches the original.
+    let argv_override =
         filtered.iter().skip(1).any(|a| {
             a == "-A" || a == "--angle" || a.starts_with("--angle=") || a.starts_with("-A")
         }) || filtered
             .iter()
             .skip(1)
             .any(|a| a == "-F" || a == "--freq" || a.starts_with("--freq=") || a.starts_with("-F"));
-    if !overridden {
+    if !argv_override && cfg.angle.is_none() && cfg.freq.is_none() {
         opts.angle = HELP_ANGLE;
         opts.freq = HELP_FREQ;
     }

@@ -9,6 +9,7 @@ mod ansi;
 mod cat;
 mod cli;
 mod color;
+mod config;
 mod convert;
 mod engine;
 mod help;
@@ -40,10 +41,18 @@ fn main() {
         convert::run(&raw_args);
         process::exit(0);
     }
+    // --convert runs first and never reads the config file.
+    if !wants_help && convert::requested(&raw_args) {
+        convert::run(&raw_args);
+        process::exit(0);
+    }
+    // Load the config file (silent; `cfg` holds the merged defaults, `found`
+    // is Some(path) when a file exists — possibly one that failed to parse).
+    let (cfg, found) = config::load();
     // --help/-h: strip it, re-parse the rest, and render help text
     // through the colorizer with those flags (equivalent to
     // `echo "help text" | lolcat <other flags>`)
-    if let Some(opts) = check_help() {
+    if let Some(opts) = check_help(&cfg) {
         let stdout_tty = io::stdout().is_terminal();
         install_ctrlc_handler(stdout_tty, false);
         let text = help_text();
@@ -60,10 +69,16 @@ fn main() {
 
     let cli = Cli::parse();
 
-    // range validation
+    // range validation of the explicitly given options
     if let Err(msg) = validate(&cli) {
         eprintln!("Error: argument {}.", msg);
         process::exit(2);
+    }
+
+    // No config file existed at any layer: create the default one on first
+    // use (portable layer first, then the user layer; silent on failure).
+    if found.is_none() {
+        let _ = config::auto_generate();
     }
 
     let stdout_tty = io::stdout().is_terminal();
@@ -71,7 +86,7 @@ fn main() {
     // sequences drain (see install_ctrlc_handler); otherwise exit at once.
     let drain_on_int = !io::stdin().is_terminal();
     install_ctrlc_handler(stdout_tty, drain_on_int);
-    let opts = cli_to_opts(&cli);
+    let opts = cli_to_opts(&cli, &cfg);
 
     let mut eng = Engine::new();
     let mut out = BufWriter::new(io::stdout());
