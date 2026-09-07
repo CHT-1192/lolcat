@@ -87,6 +87,13 @@ $ lolcat -P -A 0 -F 5   # pure hues, one rainbow cycle per 5 characters
 $ lolcat -A 180         # stripes reversed
 ```
 
+## Configuration
+
+**Planned** — a `lolcat.config.jsonc` file can supply defaults for the
+valued options (`freq`/`seed`/`angle`/`duration`/`speed`); command-line
+arguments always win. See [docs/config.md](docs/config.md) for the full
+design (discovery, JSONC format, error handling).
+
 ## License
 
 BSD 3-Clause — see [LICENSE](LICENSE).
