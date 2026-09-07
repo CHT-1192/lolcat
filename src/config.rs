@@ -385,9 +385,11 @@ mod tests {
         assert_eq!(cfg, ConfigDefaults::default());
     }
 
+    #[cfg(unix)]
     #[test]
-    fn user_layer_paths() {
-        // XDG wins over ~/.config; HOME used as fallback.
+    fn user_layer_paths_unix() {
+        // XDG wins over ~/.config; HOME used as fallback. (Unix semantics;
+        // Windows uses %APPDATA% — see user_layer_paths_windows.)
         std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-stub");
         std::env::set_var("HOME", "/tmp/home-stub");
         assert_eq!(
@@ -399,6 +401,25 @@ mod tests {
             user_config_dir(),
             Some(PathBuf::from("/tmp/home-stub/.config/lolcat"))
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn user_layer_paths_windows() {
+        // %APPDATA% wins; %LOCALAPPDATA% is the fallback; neither → None.
+        std::env::set_var("APPDATA", "C:\\appdata-stub");
+        std::env::set_var("LOCALAPPDATA", "C:\\local-stub");
+        assert_eq!(
+            user_config_dir(),
+            Some(PathBuf::from("C:\\appdata-stub\\lolcat"))
+        );
+        std::env::remove_var("APPDATA");
+        assert_eq!(
+            user_config_dir(),
+            Some(PathBuf::from("C:\\local-stub\\lolcat"))
+        );
+        std::env::remove_var("LOCALAPPDATA");
+        assert_eq!(user_config_dir(), None);
     }
 
     #[test]
