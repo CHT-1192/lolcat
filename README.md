@@ -103,6 +103,12 @@ next to the executable (or in the user config dir when that is not
 writable). Bad input is silent — a syntax error ignores the file, a bad
 key is skipped. See [docs/config.md](docs/config.md) for details.
 
+## Known issues
+
+The `-a` animation has a tracked audit of adversarial edge cases (wide
+characters, cursor-moving escapes, tabs, interrupts, …), each marked fixed
+or open: [docs/audit-edge-cases.md](docs/audit-edge-cases.md).
+
 ## License
 
 BSD 3-Clause — see [LICENSE](LICENSE).
