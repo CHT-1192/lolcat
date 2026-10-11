@@ -27,6 +27,8 @@ use std::path::{Path, PathBuf};
 
 use jsonc_parser::{parse_to_value, JsonValue, ParseOptions};
 
+use crate::options::BottomSpec;
+
 /// Strict JSONC: comments allowed, everything else must be plain JSON —
 /// trailing commas, loose property names, single quotes, missing commas and
 /// hex/`+` numbers are all rejected.
@@ -60,6 +62,8 @@ pub(crate) struct ConfigDefaults {
     /// Tab handling: N ≥ 1 = exactly N spaces per tab, `-1` = next 8-column
     /// tab stop. This key has no CLI flag (config-only by request).
     pub(crate) tab: Option<i64>,
+    /// Where the reveal front meets the window's bottom row (config-only).
+    pub(crate) bottom: Option<BottomSpec>,
 }
 
 /// Layer 1: the `$LOLCAT_CONFIG` path, when it names an existing file.
@@ -207,6 +211,11 @@ fn take_key(cfg: &mut ConfigDefaults, key: &str, val: &JsonValue, path: &Path) {
             Some(n) if n >= 1 => cfg.tab = Some(n as i64),
             _ => bad("need an integer >= 1, or -1 for terminal tab stops"),
         },
+        // Config-only key: where the reveal front meets the bottom row.
+        "bottom" => match num(val).and_then(BottomSpec::from_value) {
+            Some(spec) => cfg.bottom = Some(spec),
+            None => bad("need 0, a fraction in (0,1), or an integer column >= 1"),
+        },
         _ => bad("unknown key"),
     }
 }
@@ -246,7 +255,11 @@ fn defaults_doc() -> String {
         "  \"speed\": 60,\n",
         "  // Tab expansion: N >= 1 = exactly N spaces per tab; -1 = advance to\n",
         "  // the next 8-column tab stop (terminal behaviour). (default: 8)\n",
-        "  \"tab\": 8\n",
+        "  \"tab\": 8,\n",
+        "  // Where the reveal front meets the terminal's bottom row when the text\n",
+        "  // is taller than the screen: 0 or 1 = first column, 0-1 (exclusive) =\n",
+        "  // fraction of the width, >= 1 = absolute column. (default: 0.4)\n",
+        "  \"bottom\": 0.4\n",
         "}\n",
     )
     .to_string()
@@ -391,6 +404,29 @@ mod tests {
         assert_eq!(cfg.duration, Some(3));
         assert_eq!(cfg.speed, Some(60.0));
         assert_eq!(cfg.tab, Some(8));
+        assert_eq!(cfg.bottom, Some(BottomSpec::Fraction(0.4)));
+    }
+
+    #[test]
+    fn bottom_key_values() {
+        assert_eq!(
+            parse_str("{ \"bottom\": 0 }").bottom,
+            Some(BottomSpec::Absolute(1))
+        );
+        assert_eq!(
+            parse_str("{ \"bottom\": 0.2 }").bottom,
+            Some(BottomSpec::Fraction(0.2))
+        );
+        assert_eq!(
+            parse_str("{ \"bottom\": 24 }").bottom,
+            Some(BottomSpec::Absolute(24))
+        );
+        assert_eq!(parse_str("{ \"bottom\": -1 }").bottom, None);
+        assert_eq!(parse_str("{ \"bottom\": 2.5 }").bottom, None);
+        // A bad bottom value does not disturb its neighbours.
+        let cfg = parse_str("{ \"bottom\": -1, \"freq\": 30 }");
+        assert_eq!(cfg.bottom, None);
+        assert_eq!(cfg.freq, Some(30.0));
     }
 
     #[test]

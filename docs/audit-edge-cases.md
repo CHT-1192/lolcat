@@ -30,7 +30,7 @@ Suite size at audit time: 47 tests. Current: 73 tests.
 | A16 | `csi_params` u64 overflow panic / unbounded pad OOM | **Open** |
 | A17 | `-a -B` silently disables animation | Fixed `12f4d15` (help + README document `-B` overrides `-a`) |
 | A18 | `-i` mode paints rainbow backgrounds on translated pad spaces | **Open** |
-| A19 | Hue bookkeeping `-a` vs plain (one-row offset; per-chunk restart) | **Open** |
+| A19 | Hue bookkeeping `-a` vs plain (one-row offset; per-chunk restart) | **Partial** — the per-chunk restart is gone: text taller than the screen now scrolls continuously through the front and the hue is keyed to the *text* row, so the phase no longer restarts every screenful. The one-row `dy` offset between the plain painter and the animation's stable colour remains. |
 | A20 | Test suite not hermetic w.r.t. `COLORTERM` | Fixed `12f4d15` (render tests clear `COLORTERM`) |
 | A21 | Block-chunk/tall-input interplay | Informational — no defect beyond A19/A8 |
 
@@ -55,9 +55,10 @@ introduced by later work live in the [B series](#b-series-introduced-by-later-wo
    degrade condition.
 4. **A12** — expose `interrupt_seen()` from `sigint.rs`, check it in the
    reveal loop, abort with `END_RESET` + exit 130 (no `?1049l`).
-5. **A18 / A19 / A6-OSC8 / A13** — `-i` pad background reset; shared hue
-   model + cumulative row offset across chunks; keep OSC 8 as a per-cell
-   fmt prefix (or document); document the interrupt half-state.
+5. **A18 / A19 / A6-OSC8 / A13** — `-i` pad background reset; align the
+   animation's stable hue with the plain painter's one-row `dy` offset
+   (the per-chunk restart half of A19 is already fixed); keep OSC 8 as a
+   per-cell fmt prefix (or document); document the interrupt half-state.
 
 ## B series (introduced by later work)
 

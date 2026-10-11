@@ -154,6 +154,9 @@ pub(crate) fn cli_to_opts(cli: &Cli, cfg: &ConfigDefaults) -> Options {
     opts.keep = !cli.no_keep || cli.keep;
     opts.force = cli.force;
     opts.quantizer = cli.quantize.unwrap_or(Quantizer::Nearest);
+    // Config-only key (no CLI flag) with a built-in default: where the
+    // reveal front meets the bottom row when the text scrolls.
+    opts.bottom = cfg.bottom.unwrap_or_default();
     // Config-only key (no CLI flag): positive N = N spaces, -1 = tab stops.
     opts.tab = match cfg.tab {
         Some(-1) => TabWidth::Stops,
@@ -258,6 +261,7 @@ mod tests {
             duration: Some(9),
             speed: Some(7.5),
             tab: None,
+            bottom: None,
         };
         let opts = cli_to_opts(&Cli::parse_from(["lolcat"]), &cfg);
         assert_eq!(opts.freq, 12.0);

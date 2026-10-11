@@ -10,8 +10,10 @@ so a user can pin their favourite rainbow parameters (or default animation
 settings) without a shell alias. Decisions made with the user:
 
 - Scope: the config file carries the **valued (numeric) options**
-  (`freq`, `seed`, `angle`, `duration`, `speed`) plus one config-only key,
-  **`tab`** (tab width — deliberately no CLI flag for it). **No booleans** —
+  (`freq`, `seed`, `angle`, `duration`, `speed`) plus two config-only keys,
+  **`tab`** (tab width) and **`bottom`** (where the reveal front meets the
+  bottom row when the text scrolls) — deliberately no CLI flags for either.
+  **No booleans** —
   switch options (`pure`, `invert`, `truecolor`, `keep`, `anchor`,
   `animate`, `force`) are inherently "explicit" on the command line and
   never come from config. Behaviour-only flags (`-h`, `-v`, `-C/--convert`)
@@ -94,6 +96,7 @@ errors.
 | `duration` | integer | 3       | ≥ 1                                          |
 | `speed`    | number  | 60.0    | finite, ≥ 0.1                                |
 | `tab`      | integer | 8       | N ≥ 1 = exactly N spaces per tab; `-1` = advance to the next 8-column tab stop. **No CLI flag** (config-only). 0/other values are skipped. Applies to every paint path (stream, `-B` anchor, `-a` reveal). |
+| `bottom`   | number  | 0.4     | Where the `-a` reveal front meets the window's bottom row when the text is taller than the screen: `0` or `1` = first column; `0 < v < 1` = fraction of the terminal width; `v ≥ 1` (integral) = absolute column. **No CLI flag** (config-only). Negative / non-integral ≥ 1 values are skipped; the resolved column is clamped to `1..=cols`. |
 
 No nested objects, no arrays — flat scalar map only. Boolean switches are
 deliberately **not** configurable (see §1). Unknown keys are skipped

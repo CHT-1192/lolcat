@@ -46,6 +46,59 @@ pub(crate) enum Quantizer {
     Paint,
 }
 
+/// Where the reveal front meets the window's bottom row — the `"bottom"`
+/// config key (no CLI flag). `0` and `1` both mean the first column;
+/// fractions below 1 are a proportion of the terminal width; integers ≥ 1
+/// are absolute columns (1-based).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum BottomSpec {
+    /// `v × terminal columns` (0 < v < 1).
+    Fraction(f64),
+    /// Absolute 1-based column.
+    Absolute(usize),
+}
+
+impl Default for BottomSpec {
+    fn default() -> BottomSpec {
+        // Maintainer-chosen default: the front may not leave the window
+        // before the top row is finished, so 0.4 of the width is a value
+        // where the diagonal just about fits the default angle.
+        BottomSpec::Fraction(0.4)
+    }
+}
+
+impl BottomSpec {
+    /// Classify a config value. `0` → first column; `0 < v < 1` → fraction;
+    /// `v ≥ 1` must be integral → absolute column. Negative, non-finite and
+    /// non-integral values ≥ 1 are rejected (the caller skips the key).
+    pub(crate) fn from_value(v: f64) -> Option<BottomSpec> {
+        if !v.is_finite() || v < 0.0 {
+            return None;
+        }
+        if v == 0.0 {
+            return Some(BottomSpec::Absolute(1));
+        }
+        if v < 1.0 {
+            return Some(BottomSpec::Fraction(v));
+        }
+        if v.fract() == 0.0 && v <= usize::MAX as f64 {
+            Some(BottomSpec::Absolute(v as usize))
+        } else {
+            None
+        }
+    }
+
+    /// Resolve to a 1-based column, clamped to `1..=cols`.
+    pub(crate) fn column(self, cols: usize) -> usize {
+        let cols = cols.max(1);
+        let n = match self {
+            BottomSpec::Fraction(f) => (f * cols as f64).round() as usize,
+            BottomSpec::Absolute(n) => n,
+        };
+        n.clamp(1, cols)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Options {
     pub(crate) freq: f64,
@@ -65,6 +118,10 @@ pub(crate) struct Options {
     pub(crate) tab: TabWidth,
     /// 256-colour mapping (`-Q/--quantize`; default: nearest).
     pub(crate) quantizer: Quantizer,
+    /// Where the reveal front meets the window's bottom row (`"bottom"`
+    /// config key; default 0.4 of the width). Only used when the text is
+    /// taller than the screen.
+    pub(crate) bottom: BottomSpec,
 }
 
 impl Options {
@@ -85,6 +142,7 @@ impl Options {
             force: false,
             tab: TabWidth::default(),
             quantizer: Quantizer::default(),
+            bottom: BottomSpec::default(),
         }
     }
 
@@ -144,6 +202,25 @@ mod tests {
         let (dx, dy) = opts.phase_step();
         assert!((dx - 1.894).abs() < 1e-3); // 6·cos(71.6°)
         assert!((dy - 5.693).abs() < 1e-3); // 6·sin(71.6°)
+    }
+
+    #[test]
+    fn bottom_spec_values() {
+        assert_eq!(BottomSpec::default(), BottomSpec::Fraction(0.4));
+        assert_eq!(BottomSpec::from_value(0.0), Some(BottomSpec::Absolute(1)));
+        assert_eq!(BottomSpec::from_value(1.0), Some(BottomSpec::Absolute(1)));
+        assert_eq!(BottomSpec::from_value(0.2), Some(BottomSpec::Fraction(0.2)));
+        assert_eq!(BottomSpec::from_value(24.0), Some(BottomSpec::Absolute(24)));
+        assert_eq!(BottomSpec::from_value(-1.0), None);
+        assert_eq!(BottomSpec::from_value(2.5), None);
+        assert_eq!(BottomSpec::from_value(f64::NAN), None);
+        // Fractions resolve against the terminal width, absolutes stay put.
+        assert_eq!(BottomSpec::Fraction(0.4).column(120), 48);
+        assert_eq!(BottomSpec::Fraction(0.2).column(120), 24);
+        assert_eq!(BottomSpec::Absolute(24).column(120), 24);
+        // Clamped into 1..=cols (0 and 1 both mean the first column).
+        assert_eq!(BottomSpec::Absolute(9999).column(120), 120);
+        assert_eq!(BottomSpec::Fraction(0.0).column(120), 1);
     }
 
     #[test]

@@ -415,13 +415,15 @@ pub fn animate<R: BufRead + ?Sized>(
         let mut input: &[u8] = &raw;
         return paint_stream(&mut input, opts, eng, out);
     }
-    // Chunk the input by screen height and reveal each chunk in place.
-    let chunk_h = rows.saturating_sub(1).max(1);
-    for (i, chunk) in all.chunks(chunk_h).enumerate() {
-        if i > 0 {
-            out.write_all(b"\n")?;
-        }
-        animate_block(chunk, opts, eng, out)?;
+    // Text that fits the window is revealed in place, exactly as before.
+    // Taller text is scrolled through a fixed front instead of being split
+    // into screen-sized chunks: the `"bottom"` key decides where the front
+    // meets the window's bottom row.
+    let window_h = rows.saturating_sub(1).max(1);
+    if all.len() <= window_h {
+        animate_block(&all, opts, eng, out)?;
+    } else {
+        animate_scroll(&all, window_h, opts.bottom.column(cols), opts, eng, out)?;
     }
     // The reveal parks the cursor at column 0 of the last row. When the
     // input ended with a newline, move to a fresh line below it so the next
@@ -555,6 +557,195 @@ fn animate_block(
     Ok(())
 }
 
+/// Reveal text that is taller than the window by scrolling it through a
+/// front that keeps the `-A` slope. The front sweeps in text coordinates as
+/// usual; as soon as its intersection with the window's bottom row has
+/// reached `bottom_col` — and the row about to leave the top is fully
+/// revealed — the text scrolls up one row and the next line enters at the
+/// bottom. Nothing is ever scrolled off before it has been revealed, so the
+/// whole text is shown exactly once, continuously (no per-screen restart).
+fn animate_scroll(
+    rows: &[Row],
+    window_h: usize,
+    bottom_col: usize,
+    opts: &Options,
+    eng: &mut Engine,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    let h = window_h.max(1);
+    let total = rows.len();
+    let cost = char_cost(opts.angle);
+    let tan = if cost <= f64::EPSILON {
+        f64::INFINITY
+    } else {
+        1.0 / cost
+    };
+    let (dx, dy) = opts.phase_step();
+
+    // Bands in text coordinates: tau(r, c) = r + c·cost, with the cell's
+    // display column. `remaining[r]` counts row r's cells not yet frozen.
+    let mut bands: Vec<Vec<(usize, usize, usize)>> = Vec::new();
+    let mut remaining: Vec<usize> = rows.iter().map(|r| r.chars.len()).collect();
+    for (r, row) in rows.iter().enumerate() {
+        let mut col = 0usize;
+        for c in 0..row.chars.len() {
+            let t = tau_of(r, col, cost);
+            if bands.len() <= t {
+                bands.resize(t + 1, Vec::new());
+            }
+            bands[t].push((r, c, col));
+            col += row.widths[c];
+        }
+    }
+    let max_tau = bands.len().saturating_sub(1);
+
+    // Blank window: one blank line per window row, parked at column 0.
+    let blank_w = rows.iter().map(Row::width).max().unwrap_or(0);
+    out.write_all(b"\x1b[?25l")?;
+    for i in 0..h {
+        for _ in 0..blank_w {
+            out.write_all(b" ")?;
+        }
+        if i + 1 < h {
+            out.write_all(b"\n")?;
+        }
+    }
+    out.write_all(b"\r")?;
+    out.flush()?;
+
+    let stable_rgb =
+        |r: usize, col: usize| color_for(eng.os + r as f64 * dy + col as f64 * dx, opts.pure);
+    let write_final =
+        |out: &mut dyn Write, r: usize, c: usize, col: usize, screen_r: usize| -> io::Result<()> {
+            let mut cb = [0u8; 4];
+            let mut glyph = rows[r].chars[c].encode_utf8(&mut cb).as_bytes().to_vec();
+            glyph.extend_from_slice(rows[r].extras[c].as_bytes());
+            let mut code = [0u8; 24];
+            let n = write_sgr(
+                &mut code,
+                eng.mode,
+                opts.invert,
+                stable_rgb(r, col),
+                opts.quantizer,
+            );
+            put_cell(out, h, screen_r, col, &rows[r].fmts[c], &code[..n], &glyph)
+        };
+
+    let d = opts.duration.max(1);
+    let speed = opts.speed.max(0.1);
+    let frame = Duration::from_secs_f64(1.0 / speed);
+
+    let mut s = 0usize; // rows scrolled so far
+    let mut pending: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); total];
+    let mut revealed: Vec<Vec<bool>> = rows.iter().map(|r| vec![false; r.chars.len()]).collect();
+    // Freeze a cell at most once (the tail passes below can overlap).
+    macro_rules! freeze {
+        ($r:expr, $c:expr, $col:expr, $sr:expr) => {{
+            let (r, c, col, sr) = ($r, $c, $col, $sr);
+            if !revealed[r][c] {
+                revealed[r][c] = true;
+                write_final(out, r, c, col, sr)?;
+                remaining[r] = remaining[r].saturating_sub(1);
+            }
+        }};
+    }
+
+    // Bands are all revealed by `max_tau`, but scrolling the last rows into
+    // the window costs one extra step per row, so keep stepping until every
+    // row has entered.
+    let mut t = 0usize;
+    while t <= max_tau || s + h < total {
+        if t > 0 {
+            // Scroll at most one row per band, and only when it is safe: the
+            // top row must be fully revealed. `bottom_col` is the earliest
+            // point; if the whole window is already revealed we must scroll
+            // anyway, otherwise waiting could never bring the tail into view.
+            if s + h < total && remaining[s] == 0 {
+                let inter = if cost <= f64::EPSILON {
+                    f64::INFINITY
+                } else {
+                    (t as f64 - (s + h - 1) as f64) * tan
+                };
+                let window_done = (s..(s + h).min(total)).all(|r| remaining[r] == 0);
+                if inter >= bottom_col as f64 || window_done {
+                    out.write_all(b"\n")?;
+                    s += 1;
+                    // Anything that drained while its row was still below the
+                    // window appears now, frozen.
+                    let entered = s + h - 1;
+                    if entered < total {
+                        for &(r, c, col) in std::mem::take(&mut pending[entered]).iter() {
+                            freeze!(r, c, col, entered - s);
+                        }
+                    }
+                }
+            }
+            // Freeze the previous band. Cells below the window wait in
+            // `pending` until their row scrolls in.
+            if let Some(prev) = bands.get(t - 1) {
+                for &(r, c, col) in prev {
+                    if r < s {
+                        // Cannot happen: a row is only scrolled past once frozen.
+                        debug_assert!(false, "cell scrolled off before being revealed");
+                    } else if r - s < h {
+                        freeze!(r, c, col, r - s);
+                    } else {
+                        pending[r].push((r, c, col));
+                    }
+                }
+            }
+            if d == 1 {
+                // Pace band boundaries at `-s` fps, as in the in-place path.
+                thread::sleep(frame);
+            }
+        }
+        // Dwell/flicker the current band (only the cells inside the window).
+        for f in 0..d {
+            if f > 0 {
+                thread::sleep(frame);
+            }
+            for &(r, _, col) in bands.get(t).map(Vec::as_slice).unwrap_or(&[]) {
+                if r < s || r - s >= h {
+                    continue;
+                }
+                let hue = random_hue();
+                let rgb = color_for(hue, opts.pure);
+                let code = {
+                    let mut code = [0u8; 24];
+                    let n = write_sgr(&mut code, eng.mode, opts.invert, rgb, opts.quantizer);
+                    code[..n].to_vec()
+                };
+                put_cell(out, h, r - s, col, &[], &code, &[random_glyph()])?;
+            }
+            out.flush()?;
+        }
+        t += 1;
+    }
+    // Freeze the last band, then any stragglers (defensive: with the scroll
+    // rule above every row has entered the window by now).
+    if let Some(last) = bands.get(max_tau) {
+        for &(r, c, col) in last {
+            if r >= s && r - s < h {
+                freeze!(r, c, col, r - s);
+            } else if r >= s {
+                pending[r].push((r, c, col));
+            }
+        }
+    }
+    for row_pending in pending.iter() {
+        for &(r, c, col) in row_pending {
+            if r >= s && r - s < h {
+                freeze!(r, c, col, r - s);
+            }
+        }
+    }
+    debug_assert!(remaining.iter().all(|&n| n == 0), "unrevealed cells left");
+    out.flush()?;
+    out.write_all(b"\x1b[?25h")?;
+    out.flush()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,6 +832,147 @@ mod tests {
         let s: String = row.chars.iter().collect();
         assert_eq!(s, "ABCD");
         assert!(row.fmts.iter().all(|f| f.is_empty()));
+    }
+
+    /// Count frozen writes of `glyph` for a row whose input SGR prefix is
+    /// `fmt`: flicker frames carry no prefix, so a match means the cell was
+    /// really revealed (frozen) at least once.
+    fn frozen_hits(out: &[u8], fmt: &[u8], glyph: u8) -> usize {
+        let mut n = 0;
+        let mut i = 0;
+        while i + fmt.len() <= out.len() {
+            if &out[i..i + fmt.len()] == fmt {
+                let mut j = i + fmt.len();
+                if j + 1 < out.len() && out[j] == 0x1b && out[j + 1] == b'[' {
+                    j += 2;
+                    while j < out.len() && !out[j].is_ascii_alphabetic() {
+                        j += 1;
+                    }
+                    if j < out.len() {
+                        j += 1;
+                    }
+                }
+                if j < out.len() && out[j] == glyph {
+                    n += 1;
+                }
+            }
+            i += 1;
+        }
+        n
+    }
+
+    #[test]
+    fn animate_scroll_reveals_every_row_and_keeps_the_window() {
+        // 12 rows of 3 cells, window height 6 → the text must scroll.
+        let total = 12usize;
+        let h = 6usize;
+        let text: String = (0..total)
+            .map(|i| {
+                format!(
+                    "\x1b[4{i}m{}{}{}\n",
+                    (b'a' + i as u8) as char,
+                    (b'a' + i as u8) as char,
+                    (b'a' + i as u8) as char
+                )
+            })
+            .collect();
+        let lines = split_lines(text.as_bytes()).unwrap();
+        let mut opts = Options::defaults();
+        opts.angle = 60.0;
+        opts.duration = 1;
+        opts.speed = 1000.0;
+        let rows: Vec<Row> = lines
+            .iter()
+            .map(|l| parse_line(l, true, opts.tab))
+            .collect();
+        let rows = &rows[..rows.len() - 1]; // drop the trailing empty row
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        animate_scroll(rows, h, 4, &opts, &mut eng, &mut out).unwrap();
+
+        // Every row was revealed (3 frozen cells each): nothing lost.
+        for i in 0..total {
+            let fmt = format!("\x1b[4{i}m").into_bytes();
+            let glyph = b'a' + i as u8;
+            assert_eq!(
+                frozen_hits(&out, &fmt, glyph),
+                3,
+                "row {i} not fully revealed"
+            );
+        }
+        // One scroll per row beyond the window height.
+        let newlines = out.iter().filter(|&&b| b == b'\n').count();
+        assert_eq!(newlines, (h - 1) + (total - h));
+        // The cursor never moves up beyond the window.
+        let mut i = 0;
+        while i + 2 < out.len() {
+            if out[i] == 0x1b && out[i + 1] == b'[' {
+                let mut j = i + 2;
+                let mut n = 0usize;
+                while j < out.len() && out[j].is_ascii_digit() {
+                    n = n * 10 + (out[j] - b'0') as usize;
+                    j += 1;
+                }
+                if j < out.len() && out[j] == b'A' {
+                    assert!(n < h, "up move {n} leaves the window");
+                }
+                i = j;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn animate_scroll_still_finishes_when_bottom_is_unreachable() {
+        // A `bottom` column far beyond the front's reach must not stall the
+        // animation: once the window is fully revealed we scroll anyway.
+        let total = 10usize;
+        let h = 4usize;
+        let text: String = (0..total)
+            .map(|i| {
+                format!(
+                    "\x1b[4{i}m{}{}\n",
+                    (b'a' + i as u8) as char,
+                    (b'a' + i as u8) as char
+                )
+            })
+            .collect();
+        let lines = split_lines(text.as_bytes()).unwrap();
+        let mut opts = Options::defaults();
+        opts.angle = 60.0;
+        opts.duration = 1;
+        opts.speed = 1000.0;
+        let rows: Vec<Row> = lines
+            .iter()
+            .map(|l| parse_line(l, true, opts.tab))
+            .collect();
+        let rows = &rows[..rows.len() - 1];
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        animate_scroll(rows, h, 100_000, &opts, &mut eng, &mut out).unwrap();
+        for i in 0..total {
+            let fmt = format!("\x1b[4{i}m").into_bytes();
+            let glyph = b'a' + i as u8;
+            assert_eq!(frozen_hits(&out, &fmt, glyph), 2, "row {i} lost");
+        }
+    }
+
+    #[test]
+    fn animate_scroll_keeps_short_texts_in_place() {
+        // The in-place path is chosen for anything that fits the window, so
+        // `animate_scroll` is only ever called with more rows than `h`.
+        let rows = vec![Row::empty(); 7];
+        let mut opts = Options::defaults();
+        opts.angle = 45.0;
+        opts.duration = 1;
+        opts.speed = 1000.0;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        // 7 empty rows in a 3-row window: every row is blank, so the window
+        // empties immediately and the walk must still terminate.
+        animate_scroll(&rows, 3, 2, &opts, &mut eng, &mut out).unwrap();
+        assert!(out.ends_with(b"\x1b[?25h"));
     }
 
     #[test]

@@ -46,6 +46,13 @@ With no FILE, or when FILE is `-`, read standard input.
 
 ### Direction
 
+With `-a`, text taller than the screen scrolls through the reveal front
+instead of being re-animated screen by screen: the front keeps the `-A`
+slope, and once it has reached the `bottom` column on the window's bottom
+row — and the row leaving the top is fully revealed — the text scrolls up
+one line, so the tail enters at the bottom and the colour phase continues
+across the whole input.
+
 With `-a` (animation) the direction is intended for the "down-right but
 not too vertical" through "straight down" sector (`-A` within `18.4..=90`
 or `198.4..=270`, ±360 equivalents). Any other angle — like any other
@@ -91,10 +98,12 @@ $ lolcat -A 180         # stripes reversed
 ## Configuration
 
 `lolcat` reads a JSONC config file for defaults of the valued options
-(`freq`/`seed`/`angle`/`duration`/`speed`) plus one config-only key, `tab`
-(tab width: `N ≥ 1` = exactly N spaces per tab, `-1` = advance to the next
-8-column tab stop; default 8). Command-line arguments always win. Lookup
-order — first file found wins:
+(`freq`/`seed`/`angle`/`duration`/`speed`) plus two config-only keys:
+`tab` (tab width: `N ≥ 1` = exactly N spaces per tab, `-1` = advance to the
+next 8-column tab stop; default 8) and `bottom` (where the `-a` reveal front
+meets the bottom row when the text is taller than the screen: `0`/`1` =
+first column, a fraction `0..1`, or an absolute column; default `0.4`).
+Command-line arguments always win. Lookup order — first file found wins:
 
 1. `$LOLCAT_CONFIG` (explicit path)
 2. `$XDG_CONFIG_HOME/lolcat/config.jsonc` (default `~/.config/lolcat/`; on
