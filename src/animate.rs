@@ -455,7 +455,13 @@ fn animate_block(
         let mut cb = [0u8; 4];
         let enc = rows[r].chars[c].encode_utf8(&mut cb).as_bytes().to_vec();
         let mut code = [0u8; 24];
-        let n = write_sgr(&mut code, eng.mode, opts.invert, stable_rgb(r, c));
+        let n = write_sgr(
+            &mut code,
+            eng.mode,
+            opts.invert,
+            stable_rgb(r, c),
+            opts.quantizer,
+        );
         put_cell(out, height, r, c, &rows[r].fmts[c], &code[..n], &enc)?;
         Ok(())
     };
@@ -498,7 +504,7 @@ fn animate_block(
                 let rgb = color_for(hue, opts.pure);
                 let code = {
                     let mut code = [0u8; 24];
-                    let n = write_sgr(&mut code, eng.mode, opts.invert, rgb);
+                    let n = write_sgr(&mut code, eng.mode, opts.invert, rgb, opts.quantizer);
                     code[..n].to_vec()
                 };
                 put_cell(out, height, r, c, &[], &code, &[random_glyph()])?;

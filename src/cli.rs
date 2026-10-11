@@ -10,7 +10,7 @@ use clap::Parser;
 
 use crate::config::ConfigDefaults;
 use crate::help::VERSION;
-use crate::options::{Options, TabWidth, TAB_STOP};
+use crate::options::{Options, Quantizer, TabWidth, TAB_STOP};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -53,6 +53,10 @@ pub(crate) struct Cli {
     /// 24-bit truecolor mode
     #[arg(short = 't', long = "truecolor", default_value_t = false)]
     truecolor: bool,
+
+    /// 256-colour mapping: nearest (default) or paint (lolcat 100.0.1 parity)
+    #[arg(short = 'Q', long = "quantize", value_enum)]
+    quantize: Option<Quantizer>,
 
     /// Pure saturated hue-wheel palette (default: classic pastel)
     #[arg(short = 'P', long = "pure", default_value_t = false)]
@@ -149,6 +153,7 @@ pub(crate) fn cli_to_opts(cli: &Cli, cfg: &ConfigDefaults) -> Options {
     opts.anchor = cli.anchor;
     opts.keep = !cli.no_keep || cli.keep;
     opts.force = cli.force;
+    opts.quantizer = cli.quantize.unwrap_or(Quantizer::Nearest);
     // Config-only key (no CLI flag): positive N = N spaces, -1 = tab stops.
     opts.tab = match cfg.tab {
         Some(-1) => TabWidth::Stops,
@@ -214,6 +219,22 @@ mod tests {
     fn cli_dash_is_stdin() {
         let cli = Cli::parse_from(["lolcat", "-"]);
         assert_eq!(cli.files[0].to_string_lossy(), "-");
+    }
+
+    #[test]
+    fn cli_quantize_flag() {
+        let cli = Cli::parse_from(["lolcat", "-Q", "paint"]);
+        assert_eq!(cli.quantize, Some(Quantizer::Paint));
+        let cli = Cli::parse_from(["lolcat", "--quantize=nearest"]);
+        assert_eq!(cli.quantize, Some(Quantizer::Nearest));
+        assert!(Cli::try_parse_from(["lolcat", "-Q", "bogus"]).is_err());
+        // Absent → nearest (current behaviour, no output change).
+        let cli = Cli::parse_from(["lolcat"]);
+        assert_eq!(cli.quantize, None);
+        assert_eq!(
+            cli_to_opts(&cli, &ConfigDefaults::default()).quantizer,
+            Quantizer::Nearest
+        );
     }
 
     #[test]

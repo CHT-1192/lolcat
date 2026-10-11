@@ -35,7 +35,7 @@ const HELP_FOOTER: &str = concat!(
     "Report lolcat translation bugs to <http://speaklolcat.com/>\n",
 );
 
-const HELP_OPTIONS: [(&str, &str); 15] = [
+const HELP_OPTIONS: [(&str, &str); 16] = [
     (
         "-F, --freq=<f>",
         "Hue cycles once every F grid units (default: 60)",
@@ -58,6 +58,10 @@ const HELP_OPTIONS: [(&str, &str); 15] = [
     ("-s, --speed=<f>", "Animation speed (default: 60.0)"),
     ("-i, --invert", "Invert fg and bg"),
     ("-t, --truecolor", "24-bit (truecolor)"),
+    (
+        "-Q, --quantize=<s>",
+        "256-colour map: nearest (default) or paint",
+    ),
     (
         "-P, --pure",
         "Pure saturated hue wheel (default: classic pastel)",

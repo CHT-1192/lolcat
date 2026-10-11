@@ -35,6 +35,17 @@ impl Default for TabWidth {
     }
 }
 
+/// 256-colour quantiser (`-Q/--quantize`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub(crate) enum Quantizer {
+    /// True nearest entry of the xterm-256 palette (default).
+    #[default]
+    Nearest,
+    /// The Paint gem's buckets, byte-identical to lolcat 100.0.1's
+    /// 256-colour mode (`Paint.color`).
+    Paint,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Options {
     pub(crate) freq: f64,
@@ -52,6 +63,8 @@ pub(crate) struct Options {
     pub(crate) force: bool,
     /// Tab expansion (`"tab"` config key; default: 8 fixed spaces).
     pub(crate) tab: TabWidth,
+    /// 256-colour mapping (`-Q/--quantize`; default: nearest).
+    pub(crate) quantizer: Quantizer,
 }
 
 impl Options {
@@ -71,6 +84,7 @@ impl Options {
             keep: true,
             force: false,
             tab: TabWidth::default(),
+            quantizer: Quantizer::default(),
         }
     }
 

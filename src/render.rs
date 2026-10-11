@@ -34,7 +34,7 @@ pub(crate) fn emit_char(
     }
     let rgb = color_for(hue, opts.pure);
     let mut buf = [0u8; 64];
-    let mut n = write_sgr(&mut buf, eng.mode, opts.invert, rgb);
+    let mut n = write_sgr(&mut buf, eng.mode, opts.invert, rgb, opts.quantizer);
     buf[n..n + bytes.len()].copy_from_slice(bytes);
     n += bytes.len();
     buf[n..n + reset.len()].copy_from_slice(reset);
@@ -94,7 +94,7 @@ pub(crate) fn println_plain(
             }
             let rgb = color_for(eng.os + (i as f64) * dx, opts.pure);
             let mut buf = [0u8; 48];
-            let mut n = write_sgr(&mut buf, eng.mode, opts.invert, rgb);
+            let mut n = write_sgr(&mut buf, eng.mode, opts.invert, rgb, opts.quantizer);
             let mut cb = [0u8; 4];
             let enc = c.encode_utf8(&mut cb).as_bytes();
             buf[n..n + enc.len()].copy_from_slice(enc);
@@ -166,6 +166,17 @@ mod tests {
         opts.os = 0.0;
         opts.truecolor = true;
         let exp = b"\x1b[38;2;128;237;18ma\x1b[39m".to_vec();
+        assert_eq!(render("a", &opts), exp);
+    }
+
+    #[test]
+    fn render_256_paint_quantizer() {
+        // -Q paint = the original lolcat 100.0.1 mapping for the same hue
+        // (pastel 0° = (128,237,18) → Paint 154, nearest 118).
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.quantizer = crate::options::Quantizer::Paint;
+        let exp = b"\x1b[38;5;154ma\x1b[39m".to_vec();
         assert_eq!(render("a", &opts), exp);
     }
 

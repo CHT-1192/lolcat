@@ -37,6 +37,7 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-s`, `--speed <f64>` | Animation speed (default: 60.0) |
 | `-i`, `--invert` | Invert fg and bg |
 | `-t`, `--truecolor` | 24-bit truecolor mode |
+| `-Q`, `--quantize <s>` | 256-colour mapping: `nearest` (default) or `paint` (lolcat 100.0.1 parity) |
 | `-P`, `--pure` | Pure saturated hue wheel (default: classic pastel) |
 | `-K`, `--keep` | Keep input colours in `-a` animation (backgrounds; foreground with `-i`). Default: on; use `--no-keep` to disable |
 | `-f`, `--force` | Force color when stdout is not a tty |

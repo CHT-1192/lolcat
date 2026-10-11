@@ -15,7 +15,9 @@ settings) without a shell alias. Decisions made with the user:
   switch options (`pure`, `invert`, `truecolor`, `keep`, `anchor`,
   `animate`, `force`) are inherently "explicit" on the command line and
   never come from config. Behaviour-only flags (`-h`, `-v`, `-C/--convert`)
-  likewise never come from config.
+  likewise never come from config. `-Q/--quantize` (the 256-colour mapping)
+  is a valued option but is deliberately **CLI-only** for now: config
+  parsing accepts numbers only.
 - Precedence (for the keys that exist): **command line > config file >
   built-in defaults**.
 - Invalid files: **silent** (details only under `LOLCAT_DEBUG`); granularity

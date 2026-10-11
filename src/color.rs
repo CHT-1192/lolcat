@@ -6,6 +6,7 @@
 //! nearest-colour table, and SGR sequence emission into a stack buffer.
 
 use crate::engine::ColorMode;
+use crate::options::Quantizer;
 
 /// True hue wheel: hue 0° = pure red (ff0000), one full revolution around
 /// the HSV circle (yellow → green → cyan → blue → magenta → red).
@@ -159,6 +160,33 @@ fn rgb_to_256(red: u8, green: u8, blue: u8) -> u8 {
     best_i
 }
 
+/// The Paint gem's `rgb_to_256` — what lolcat 100.0.1 emits in 256-colour
+/// mode. Kept for byte-parity under `-Q paint`: a grayscale heuristic
+/// followed by 6×6×6 cube buckets. Note this never uses palette entries
+/// 0–15, maps pure black to 232 (#080808) and pure white to 255 (#eeeeee),
+/// and its bucket boundaries (42.67/85.3/128/170.7/213.3) do not match the
+/// real cube levels (0/95/135/175/215/255) — hence the visible divergence
+/// from [`rgb_to_256`].
+pub(crate) fn rgb_to_256_paint(red: u8, green: u8, blue: u8) -> u8 {
+    let (r, g, b) = (red as i32, green as i32, blue as i32);
+    let mut gray_possible = true;
+    let mut sep = 42.5f64;
+    let mut gray = true;
+    while gray_possible {
+        let (rf, gf, bf) = (r as f64, g as f64, b as f64);
+        if rf < sep || gf < sep || bf < sep {
+            gray = rf < sep && gf < sep && bf < sep;
+            gray_possible = false;
+        }
+        sep += 42.5;
+    }
+    if gray {
+        (232.0 + ((r + g + b) as f64 / 33.0).round()) as u8
+    } else {
+        (16 + (6 * r / 256) * 36 + (6 * g / 256) * 6 + (6 * b / 256)) as u8
+    }
+}
+
 /// Append the decimal digits of `v` (≤ 65535) at `buf[pos..]`; returns the
 /// new position.
 fn push_u(buf: &mut [u8], mut pos: usize, mut v: u32) -> usize {
@@ -179,8 +207,16 @@ fn push_u(buf: &mut [u8], mut pos: usize, mut v: u32) -> usize {
 }
 
 /// Write a foreground/background SGR colour code into `buf` (no heap
-/// allocation). Returns the number of bytes written.
-pub(crate) fn write_sgr(buf: &mut [u8], mode: ColorMode, invert: bool, rgb: [u8; 3]) -> usize {
+/// allocation). Returns the number of bytes written. In 256-colour mode the
+/// index comes from `quantizer` (nearest by default, Paint for lolcat
+/// 100.0.1 parity).
+pub(crate) fn write_sgr(
+    buf: &mut [u8],
+    mode: ColorMode,
+    invert: bool,
+    rgb: [u8; 3],
+    quantizer: Quantizer,
+) -> usize {
     let prefix: &[u8] = match (mode, invert) {
         (ColorMode::Truecolor, false) => b"\x1b[38;2;",
         (ColorMode::Truecolor, true) => b"\x1b[48;2;",
@@ -200,7 +236,10 @@ pub(crate) fn write_sgr(buf: &mut [u8], mode: ColorMode, invert: bool, rgb: [u8;
             n = push_u(buf, n, rgb[2] as u32);
         }
         ColorMode::Pal256 => {
-            let k = rgb_to_256(rgb[0], rgb[1], rgb[2]);
+            let k = match quantizer {
+                Quantizer::Nearest => rgb_to_256(rgb[0], rgb[1], rgb[2]),
+                Quantizer::Paint => rgb_to_256_paint(rgb[0], rgb[1], rgb[2]),
+            };
             n = push_u(buf, n, k as u32);
         }
     }
@@ -254,6 +293,22 @@ mod tests {
         assert_eq!(rgb_to_256(8, 8, 8), 232); // 8 + 10*0
         assert_eq!(rgb_to_256(18, 18, 18), 233); // 8 + 10*1
         assert_eq!(rgb_to_256(238, 238, 238), 255); // 8 + 10*23
+    }
+
+    #[test]
+    fn rgb_to_256_paint_vectors() {
+        // Paint gem values = what lolcat 100.0.1 emits in 256-colour mode
+        // (verified against the original binary end to end).
+        assert_eq!(rgb_to_256_paint(0, 0, 0), 232);
+        assert_eq!(rgb_to_256_paint(255, 255, 255), 255);
+        assert_eq!(rgb_to_256_paint(128, 128, 128), 244);
+        assert_eq!(rgb_to_256_paint(255, 0, 0), 196);
+        assert_eq!(rgb_to_256_paint(95, 0, 0), 88);
+        assert_eq!(rgb_to_256_paint(128, 237, 18), 154);
+        assert_eq!(rgb_to_256_paint(130, 236, 16), 154);
+        // The two quantisers disagree even on the very first pastel hue.
+        assert_eq!(rgb_to_256(128, 237, 18), 118);
+        assert_eq!(rgb_to_256(130, 236, 16), 118);
     }
 
     /// The naive full-palette scan (reference implementation).
