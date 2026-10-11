@@ -183,6 +183,14 @@ pub(crate) fn escape_len(b: &[u8]) -> Option<usize> {
     }
 }
 
+/// Display width of one character in terminal cells (`unicode-width`):
+/// 1 for ordinary text, 2 for CJK/wide glyphs, 0 for combining marks,
+/// variation selectors and zero-width joiners. Control characters report
+/// `None` upstream and are treated as width 1.
+pub(crate) fn char_width(c: char) -> usize {
+    unicode_width::UnicodeWidthChar::width(c).unwrap_or(1)
+}
+
 /// Byte length of a UTF-8 character whose lead byte is `b`, or `None` when
 /// `b` cannot start a character (a continuation or invalid byte).
 pub(crate) fn utf8_char_len(b: u8) -> Option<usize> {

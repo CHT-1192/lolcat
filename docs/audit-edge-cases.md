@@ -18,7 +18,7 @@ Suite size at audit time: 47 tests. Current: 61 tests.
 | A4 | Non-`m`/`G`/`C` CSI silently dropped (content flattened) | **Open** (whitelist-degrade not implemented) |
 | A5 | Backward/overwrite `G`/`C` unrepresentable | Folded into A4; **open** with it |
 | A6 | Escape/OSC state lost; truncated-tail garbage | **Partial** — truncated-tail dropping fixed `12f4d15`; OSC 8/0 retention still open (documented limitation) |
-| A7 | Wide/zero-width/ZWJ counted as width-1 | **Open** |
+| A7 | Wide/zero-width/ZWJ counted as width-1 | Fixed — `unicode-width` now drives the width gate, the blank pre-print, `put_cell` display columns and the reveal geometry; zero-width characters glue to their base cell; tab stops and `CSI n G` count display columns. ZWJ *grapheme clusters* are still per-cell (documented partial support: a family emoji is two wide cells, not one cluster). |
 | A8 | Strict `< cols` gate can silently disable animation (fastfetch ≤ ~90 cols) | **Open** — needs real-pty verification + doc |
 | A9 | Terminal size source / degenerate sizes | Fixed `12f4d15` (`$LINES`/`$COLUMNS` fallback, sampled once — documented) |
 | A10 | No trailing `\n` → prompt overwrites the last animated row | Fixed `12f4d15` (cursor moved past final content) |
@@ -46,17 +46,13 @@ Priority order (likelihood × severity, per the original §B):
    line contains a CSI whose final byte ∉ {`m`,`G`,`C`} (or an OSC/DCS),
    route the whole input to `paint_stream`. Makes rule 1 uniform and
    future-proofs fastfetch-style vocabulary growth.
-2. **A7** — per-cell display width (`unicode-width`): gate on summed width,
-   blank block prints width-spaces, `put_cell` right-moves to the display
-   column; width-0 marks written in place; ZWJ clusters = documented
-   partial support.
-3. **A16** — saturating `csi_params` digit accumulation, `usize::try_from`
+2. **A16** — saturating `csi_params` digit accumulation, `usize::try_from`
    with clamp, cap pad growth (≤ 2×cols).
-4. **A8** — verify under a real pty at 80 / ≥100 cols; document the exact
+3. **A8** — verify under a real pty at 80 / ≥100 cols; document the exact
    degrade condition.
-5. **A12** — expose `interrupt_seen()` from `sigint.rs`, check it in the
+4. **A12** — expose `interrupt_seen()` from `sigint.rs`, check it in the
    reveal loop, abort with `END_RESET` + exit 130 (no `?1049l`).
-6. **A18 / A19 / A6-OSC8 / A13** — `-i` pad background reset; shared hue
+5. **A18 / A19 / A6-OSC8 / A13** — `-i` pad background reset; shared hue
    model + cumulative row offset across chunks; keep OSC 8 as a per-cell
    fmt prefix (or document); document the interrupt half-state.
 

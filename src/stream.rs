@@ -8,10 +8,20 @@
 
 use std::io::{self, BufRead, Write};
 
-use crate::ansi::{escape_len, utf8_char_len};
+use crate::ansi::{char_width, escape_len, utf8_char_len};
 use crate::engine::Engine;
 use crate::options::Options;
 use crate::render::emit_char;
+
+/// Display width of a validated multi-byte character slice (1 when the
+/// bytes are not valid UTF-8, matching the previous behaviour).
+fn display_width(bytes: &[u8]) -> u64 {
+    std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|s| s.chars().next())
+        .map(|c| char_width(c) as u64)
+        .unwrap_or(1)
+}
 
 /// Colorize a byte stream as it arrives, without waiting for newlines.
 ///
@@ -115,7 +125,10 @@ pub(crate) fn paint_stream<R: BufRead + ?Sized>(
                                 &pending[i..i + l],
                                 eng.os + (col as f64) * dx,
                             )?;
-                            col += 1;
+                            // Advance by the display width: 2 for CJK/emoji,
+                            // 0 for combining marks (which glue to the
+                            // previous cell and emit no colour of their own).
+                            col += display_width(&pending[i..i + l]);
                             i += l;
                         } else {
                             // Invalid continuation bytes pass through raw.

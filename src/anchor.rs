@@ -10,10 +10,20 @@
 
 use std::io::{self, BufRead, Write};
 
-use crate::ansi::{csi_move, escape_len, utf8_char_len};
+use crate::ansi::{char_width, csi_move, escape_len, utf8_char_len};
 use crate::engine::Engine;
 use crate::options::Options;
 use crate::render::emit_char;
+
+/// Display width of a validated multi-byte character slice (1 for invalid
+/// UTF-8, as before).
+fn width_of(bytes: &[u8]) -> usize {
+    std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|s| s.chars().next())
+        .map(char_width)
+        .unwrap_or(1)
+}
 
 /// Colorize a stream whose hue is anchored to screen coordinates.
 ///
@@ -130,7 +140,9 @@ pub(crate) fn paint_anchored<R: BufRead + ?Sized>(
                                 &pending[i..i + l],
                                 hue_at(eng.os, pos),
                             )?;
-                            pos.1 += 1;
+                            // Wide glyphs occupy two screen columns; combining
+                            // marks occupy none (they glue to the previous one).
+                            pos.1 += width_of(&pending[i..i + l]) as i64;
                             i += l;
                         } else {
                             out.write_all(&pending[i..i + 1])?;

@@ -255,6 +255,53 @@ mod tests {
     }
 
     #[test]
+    fn stream_wide_chars_use_display_columns() {
+        // CJK advances the hue by two columns: after 你 (cols 0-1) the 'a'
+        // sits on column 2 → pure hue 2·6° = 12° = (255,51,0).
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 0.0;
+        opts.freq = 60.0;
+        opts.truecolor = true;
+        opts.pure = true;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new("你a".as_bytes(), 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("\x1b[38;2;255;0;0m你\x1b[39m"), "你: {:?}", s);
+        assert!(s.contains("\x1b[38;2;255;51;0ma\x1b[39m"), "a: {:?}", s);
+
+        // …and the streaming painter still matches the reference renderer.
+        let exp = render("你a", &opts);
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new("你a".as_bytes(), 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        assert_eq!(out, exp);
+    }
+
+    #[test]
+    fn anchor_wide_char_advances_two_columns() {
+        // -B: a CJK glyph occupies two screen columns, so the next cell is
+        // coloured at column 2 (hue 12° → 255;51;0), not column 1.
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 0.0;
+        opts.freq = 60.0;
+        opts.truecolor = true;
+        opts.pure = true;
+        opts.anchor = true;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new("你a".as_bytes(), 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("\x1b[38;2;255;0;0m你\x1b[39m"), "你: {:?}", s);
+        assert!(s.contains("\x1b[38;2;255;51;0ma\x1b[39m"), "a: {:?}", s);
+    }
+
+    #[test]
     fn anchor_same_cell_stable_color() {
         // Same screen cell reached twice (with junk in between) must get the
         // same colour: hue depends on the position, not the stream offset.

@@ -27,7 +27,7 @@ use std::io::{self, BufRead, Write};
 use std::thread;
 use std::time::Duration;
 
-use crate::ansi::escape_len;
+use crate::ansi::{char_width, escape_len};
 use crate::color::{color_for, write_sgr};
 use crate::engine::{set_mode, Engine};
 use crate::options::{Options, TabWidth};
@@ -119,16 +119,25 @@ fn char_cost(angle: f64) -> f64 {
     (1.0 / rad.tan()).clamp(0.0, 12.0)
 }
 
-/// One buffered text row: its characters (visual cells) plus, for each
-/// cell, the ANSI SGR prefix (background colours, styles, …) that must be
-/// emitted before it so formatting from coloured input (e.g. fastfetch's
-/// palette blocks, which are background-coloured spaces) survives.
+/// One buffered text row: its cells plus, for each cell, the ANSI SGR prefix
+/// (background colours, styles, …) that must be emitted before it so
+/// formatting from coloured input (e.g. fastfetch's palette blocks, which
+/// are background-coloured spaces) survives.
+///
+/// A cell is one *base character* plus any zero-width characters (combining
+/// marks, variation selectors, ZWJ) that must be written in the same cell;
+/// its display width is 1 or 2 terminal columns. Cells, not characters, are
+/// what the reveal positions and colours.
 #[derive(Clone)]
 struct Row {
-    /// The final characters (empty for a blank line).
+    /// Base character of each cell (empty for a blank line).
     chars: Vec<char>,
     /// Per-cell input SGR prefix bytes (may be empty).
     fmts: Vec<Vec<u8>>,
+    /// Zero-width bytes glued to the base glyph of each cell.
+    extras: Vec<String>,
+    /// Display width of each cell in columns (≥ 1, so it can be positioned).
+    widths: Vec<usize>,
 }
 
 impl Row {
@@ -136,7 +145,32 @@ impl Row {
         Row {
             chars: Vec::new(),
             fmts: Vec::new(),
+            extras: Vec::new(),
+            widths: Vec::new(),
         }
+    }
+
+    /// Add one visible character: a zero-width character joins the previous
+    /// cell's glyph; anything else becomes a new cell.
+    fn push(&mut self, c: char, fmt: &[u8]) {
+        let w = char_width(c);
+        if w == 0 {
+            if let Some(last) = self.extras.last_mut() {
+                last.push(c);
+                return;
+            }
+            // A leading zero-width character with nothing to attach to: keep
+            // it as its own (width-1) cell so it can still be positioned.
+        }
+        self.chars.push(c);
+        self.fmts.push(fmt.to_vec());
+        self.extras.push(String::new());
+        self.widths.push(w.max(1));
+    }
+
+    /// Total display width of the row in terminal columns.
+    fn width(&self) -> usize {
+        self.widths.iter().sum()
     }
 }
 
@@ -210,13 +244,12 @@ fn parse_line(line: &[u8], keep: bool, tab: TabWidth) -> Row {
                             params.first().copied().flatten().unwrap_or(d as u64) as usize
                         };
                         let pad = match final_byte {
-                            b'G' => p0(1).saturating_sub(1).saturating_sub(row.chars.len()),
+                            b'G' => p0(1).saturating_sub(1).saturating_sub(row.width()),
                             b'C' => p0(1),
                             _ => 0,
                         };
                         for _ in 0..pad {
-                            row.chars.push(' ');
-                            row.fmts.push(fmt.clone());
+                            row.push(' ', &fmt);
                         }
                     }
                     i += l;
@@ -239,9 +272,8 @@ fn parse_line(line: &[u8], keep: bool, tab: TabWidth) -> Row {
             // Tabs expand into cells too (the `"tab"` config key), so the
             // frozen frame keeps the plain painter's column layout instead
             // of writing a raw TAB mid-row and leaving a flash glyph behind.
-            for _ in 0..tab.cells(row.chars.len()) {
-                row.chars.push(' ');
-                row.fmts.push(fmt.clone());
+            for _ in 0..tab.cells(row.width()) {
+                row.push(' ', &fmt);
             }
             i += 1;
             continue;
@@ -261,8 +293,7 @@ fn parse_line(line: &[u8], keep: bool, tab: TabWidth) -> Row {
         let seg = &line[i..end];
         if let Ok(s) = std::str::from_utf8(seg) {
             for c in s.chars() {
-                row.chars.push(c);
-                row.fmts.push(fmt.clone());
+                row.push(c, &fmt);
             }
         }
         i = end;
@@ -280,7 +311,7 @@ fn put_cell(
     out: &mut dyn Write,
     rows: usize,
     r: usize,
-    c: usize,
+    col: usize,
     fmt: &[u8],
     code: &[u8],
     glyph: &[u8],
@@ -291,9 +322,9 @@ fn put_cell(
         out.write_all(up.to_string().as_bytes())?;
         out.write_all(b"A")?;
     }
-    if c > 0 {
+    if col > 0 {
         out.write_all(b"\x1b[")?;
-        out.write_all(c.to_string().as_bytes())?;
+        out.write_all(col.to_string().as_bytes())?;
         out.write_all(b"C")?;
     }
     if !fmt.is_empty() {
@@ -378,7 +409,8 @@ pub fn animate<R: BufRead + ?Sized>(
         return paint_stream(&mut input, opts, eng, out);
     }
     // A line at least as wide as the terminal would wrap: no geometry.
-    let too_wide = all.iter().any(|l| l.chars.len() >= cols);
+    // Display width, not cell count: a row of 40 CJK glyphs is 80 columns.
+    let too_wide = all.iter().any(|l| l.width() >= cols);
     if too_wide {
         let mut input: &[u8] = &raw;
         return paint_stream(&mut input, opts, eng, out);
@@ -399,7 +431,7 @@ pub fn animate<R: BufRead + ?Sized>(
     if raw.ends_with(b"\n") {
         out.write_all(b"\n")?;
     } else if let Some(last) = all.last() {
-        let w = last.chars.len();
+        let w = last.width();
         if w > 0 {
             out.write_all(b"\x1b[")?;
             out.write_all(w.to_string().as_bytes())?;
@@ -421,7 +453,7 @@ fn animate_block(
     out.write_all(b"\x1b[?25l")?;
     let height = rows.len();
     for (i, row) in rows.iter().enumerate() {
-        for _ in 0..row.chars.len() {
+        for _ in 0..row.width() {
             out.write_all(b" ")?;
         }
         if i + 1 < height {
@@ -437,10 +469,7 @@ fn animate_block(
 
     let cost = char_cost(opts.angle);
     let (dx, dy) = opts.phase_step();
-    let (max_c, max_r) = (
-        rows.iter().map(|r| r.chars.len()).max().unwrap_or(0),
-        height,
-    );
+    let (max_c, max_r) = (rows.iter().map(|r| r.width()).max().unwrap_or(0), height);
     let max_tau = if max_c == 0 {
         0
     } else {
@@ -449,20 +478,22 @@ fn animate_block(
 
     // Stable per-cell colour (stream style: hue = os + row·dy + col·dx).
     let stable_rgb =
-        |r: usize, c: usize| color_for(eng.os + r as f64 * dy + c as f64 * dx, opts.pure);
+        |r: usize, col: usize| color_for(eng.os + r as f64 * dy + col as f64 * dx, opts.pure);
 
-    let write_final = |out: &mut dyn Write, r: usize, c: usize| -> io::Result<()> {
+    let write_final = |out: &mut dyn Write, r: usize, c: usize, col: usize| -> io::Result<()> {
         let mut cb = [0u8; 4];
-        let enc = rows[r].chars[c].encode_utf8(&mut cb).as_bytes().to_vec();
+        let mut glyph = rows[r].chars[c].encode_utf8(&mut cb).as_bytes().to_vec();
+        // Combining marks / ZWJ / selectors belong to this cell's glyph.
+        glyph.extend_from_slice(rows[r].extras[c].as_bytes());
         let mut code = [0u8; 24];
         let n = write_sgr(
             &mut code,
             eng.mode,
             opts.invert,
-            stable_rgb(r, c),
+            stable_rgb(r, col),
             opts.quantizer,
         );
-        put_cell(out, height, r, c, &rows[r].fmts[c], &code[..n], &enc)?;
+        put_cell(out, height, r, col, &rows[r].fmts[c], &code[..n], &glyph)?;
         Ok(())
     };
 
@@ -471,19 +502,21 @@ fn animate_block(
     let frame = Duration::from_secs_f64(1.0 / speed);
 
     // cell list per reveal step
-    let mut by_step: Vec<Vec<(usize, usize)>> = vec![Vec::new(); max_tau + 1];
+    let mut by_step: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); max_tau + 1];
     for (r, row) in rows.iter().enumerate() {
-        for (c, _) in row.chars.iter().enumerate() {
-            let t = tau_of(r, c, cost).min(max_tau);
-            by_step[t].push((r, c));
+        let mut col = 0usize;
+        for c in 0..row.chars.len() {
+            let t = tau_of(r, col, cost).min(max_tau);
+            by_step[t].push((r, c, col));
+            col += row.widths[c];
         }
     }
 
     for step in 0..=max_tau {
         // Freeze the previous band first (same frame the next is born).
         if step > 0 {
-            for &(r, c) in &by_step[step - 1] {
-                write_final(out, r, c)?;
+            for &(r, c, col) in &by_step[step - 1] {
+                write_final(out, r, c, col)?;
             }
             if d == 1 {
                 // `-d 1` has no intra-band dwell, so the step boundary
@@ -499,7 +532,7 @@ fn animate_block(
             if f > 0 {
                 thread::sleep(frame);
             }
-            for &(r, c) in band {
+            for &(r, _, col) in band {
                 let hue = random_hue();
                 let rgb = color_for(hue, opts.pure);
                 let code = {
@@ -507,14 +540,14 @@ fn animate_block(
                     let n = write_sgr(&mut code, eng.mode, opts.invert, rgb, opts.quantizer);
                     code[..n].to_vec()
                 };
-                put_cell(out, height, r, c, &[], &code, &[random_glyph()])?;
+                put_cell(out, height, r, col, &[], &code, &[random_glyph()])?;
             }
             out.flush()?;
         }
     }
     // Freeze the last band.
-    for &(r, c) in &by_step[max_tau] {
-        write_final(out, r, c)?;
+    for &(r, c, col) in &by_step[max_tau] {
+        write_final(out, r, c, col)?;
     }
     out.flush()?;
     out.write_all(b"\x1b[?25h")?;
@@ -608,6 +641,66 @@ mod tests {
         let s: String = row.chars.iter().collect();
         assert_eq!(s, "ABCD");
         assert!(row.fmts.iter().all(|f| f.is_empty()));
+    }
+
+    #[test]
+    fn animate_block_places_wide_cells_at_display_columns() {
+        // angle 90 → cost 0, so the whole row is one band and every cell is
+        // frozen in one pass. The running display column must be used for
+        // positioning (你 at 0, 'a' at 2) and for the blank pre-print.
+        let mut opts = Options::defaults();
+        opts.angle = 90.0;
+        opts.duration = 1;
+        opts.speed = 1000.0;
+        opts.tab = TabWidth::Spaces(8);
+        let rows: Vec<Row> =
+            std::iter::once(parse_line("你a".as_bytes(), true, opts.tab)).collect();
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        animate_block(&rows, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains('你'), "wide glyph missing: {s:?}");
+        assert!(s.contains("\x1b[2C"), "expected a two-column move: {s:?}");
+        // Blank block pre-prints three columns (2 for 你 + 1 for a).
+        assert!(s.matches(' ').count() >= 3, "blanks: {s:?}");
+
+        // A combining mark is written inside its base cell, not positioned
+        // separately.
+        let rows: Vec<Row> =
+            std::iter::once(parse_line("A\u{301}".as_bytes(), true, opts.tab)).collect();
+        let mut out = Vec::new();
+        animate_block(&rows, &opts, &mut eng, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("A\u{301}"), "combined glyph missing: {s:?}");
+    }
+
+    #[test]
+    fn parse_line_tracks_display_width() {
+        // CJK: one cell, two columns.
+        let row = parse_line("你ab".as_bytes(), true, TabWidth::Spaces(8));
+        assert_eq!(row.chars, vec!['你', 'a', 'b']);
+        assert_eq!(row.widths, vec![2, 1, 1]);
+        assert_eq!(row.width(), 4);
+
+        // Zero-width characters glue to the base cell instead of becoming
+        // cells of their own (combining acute, VS16).
+        let row = parse_line("A\u{301}\u{fe0f}x".as_bytes(), true, TabWidth::Spaces(8));
+        assert_eq!(row.chars, vec!['A', 'x']);
+        assert_eq!(row.extras[0], "\u{301}\u{fe0f}");
+        assert_eq!(row.width(), 2);
+
+        // Tab stops count display columns, not cells: 你 occupies 0-1, so a
+        // tab must add 6 spaces to reach column 8.
+        let row = parse_line("你\tz".as_bytes(), true, TabWidth::Stops);
+        assert_eq!(row.width(), 9);
+        assert_eq!(row.chars.last(), Some(&'z'));
+        assert_eq!(row.chars.len(), 8); // 你 + 6 spaces + z
+
+        // Absolute column moves (`ESC[10G`) also target display columns.
+        let row = parse_line("你\x1b[10Gx".as_bytes(), true, TabWidth::Spaces(8));
+        assert_eq!(row.width(), 10);
+        assert_eq!(row.chars.last(), Some(&'x'));
+        assert_eq!(row.widths[0], 2);
     }
 
     #[test]

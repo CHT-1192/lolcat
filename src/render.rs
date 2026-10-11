@@ -84,15 +84,19 @@ pub(crate) fn println_plain(
     } else {
         b"\x1b[39m".as_slice()
     };
-    for (i, (esc, ch)) in filtered.iter().enumerate() {
+    // Hue advances by *display* column (2 for CJK/emoji, 0 for combining
+    // marks), matching the streaming painter.
+    let mut col = 0usize;
+    for (esc, ch) in filtered.iter() {
         out.write_all(esc.as_bytes())?;
         if let Some(c) = ch {
             if *c == ' ' && !opts.invert {
                 // Foreground-coloured spaces are invisible: emit plainly.
                 out.write_all(b" ")?;
+                col += 1;
                 continue;
             }
-            let rgb = color_for(eng.os + (i as f64) * dx, opts.pure);
+            let rgb = color_for(eng.os + (col as f64) * dx, opts.pure);
             let mut buf = [0u8; 48];
             let mut n = write_sgr(&mut buf, eng.mode, opts.invert, rgb, opts.quantizer);
             let mut cb = [0u8; 4];
@@ -102,6 +106,7 @@ pub(crate) fn println_plain(
             buf[n..n + reset.len()].copy_from_slice(reset);
             n += reset.len();
             out.write_all(&buf[..n])?;
+            col += crate::ansi::char_width(*c);
         }
     }
     Ok(())
