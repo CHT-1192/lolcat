@@ -49,7 +49,7 @@ fn debug(msg: &str) {
     }
 }
 
-/// The five configurable defaults; `None` = not set (built-in default wins).
+/// The configurable defaults; `None` = not set (built-in default wins).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct ConfigDefaults {
     pub(crate) freq: Option<f64>,
@@ -57,6 +57,9 @@ pub(crate) struct ConfigDefaults {
     pub(crate) angle: Option<f64>,
     pub(crate) duration: Option<u64>,
     pub(crate) speed: Option<f64>,
+    /// Tab handling: N ≥ 1 = exactly N spaces per tab, `-1` = next 8-column
+    /// tab stop. This key has no CLI flag (config-only by request).
+    pub(crate) tab: Option<i64>,
 }
 
 /// Layer 1: the `$LOLCAT_CONFIG` path, when it names an existing file.
@@ -197,6 +200,13 @@ fn take_key(cfg: &mut ConfigDefaults, key: &str, val: &JsonValue, path: &Path) {
             Some(s) if s.is_finite() && s >= 0.1 => cfg.speed = Some(s),
             _ => bad("need a finite number >= 0.1"),
         },
+        // Config-only key: positive N = exactly N spaces per tab, -1 = the
+        // next 8-column tab stop. 0 and other values are skipped.
+        "tab" => match integer(val, i64::MIN as f64, i64::MAX as f64) {
+            Some(-1) => cfg.tab = Some(-1),
+            Some(n) if n >= 1 => cfg.tab = Some(n as i64),
+            _ => bad("need an integer >= 1, or -1 for terminal tab stops"),
+        },
         _ => bad("unknown key"),
     }
 }
@@ -223,7 +233,7 @@ fn defaults_doc() -> String {
     concat!(
         "{\n",
         "  // Rainbow frequency: hue completes one full cycle every F grid\n",
-        "  // units. 0 disables the rainbow spin. (default: 60)\n",
+        "  // units. Must be > 0. (default: 60)\n",
         "  \"freq\": 60,\n",
         "  // Starting hue in degrees; 0 = random. A fixed non-zero value gives\n",
         "  // repeatable output. (default: 0)\n",
@@ -233,7 +243,10 @@ fn defaults_doc() -> String {
         "  // Animation duration, frames per band. (default: 3)\n",
         "  \"duration\": 3,\n",
         "  // Animation speed, frames per second. (default: 60)\n",
-        "  \"speed\": 60\n",
+        "  \"speed\": 60,\n",
+        "  // Tab expansion: N >= 1 = exactly N spaces per tab; -1 = advance to\n",
+        "  // the next 8-column tab stop (terminal behaviour). (default: 8)\n",
+        "  \"tab\": 8\n",
         "}\n",
     )
     .to_string()
@@ -377,6 +390,23 @@ mod tests {
         assert_eq!(cfg.angle, Some(71.6));
         assert_eq!(cfg.duration, Some(3));
         assert_eq!(cfg.speed, Some(60.0));
+        assert_eq!(cfg.tab, Some(8));
+    }
+
+    #[test]
+    fn tab_key_accepts_width_or_minus_one() {
+        assert_eq!(parse_str("{ \"tab\": 4 }").tab, Some(4));
+        assert_eq!(parse_str("{ \"tab\": 1 }").tab, Some(1));
+        assert_eq!(parse_str("{ \"tab\": -1 }").tab, Some(-1));
+        // 0, other negatives and fractions are skipped (key stays unset).
+        assert_eq!(parse_str("{ \"tab\": 0 }").tab, None);
+        assert_eq!(parse_str("{ \"tab\": -2 }").tab, None);
+        assert_eq!(parse_str("{ \"tab\": 2.5 }").tab, None);
+        assert_eq!(parse_str("{ \"tab\": \"4\" }").tab, None);
+        // A bad tab value must not disturb the neighbouring keys.
+        let cfg = parse_str("{ \"tab\": 0, \"freq\": 30 }");
+        assert_eq!(cfg.tab, None);
+        assert_eq!(cfg.freq, Some(30.0));
     }
 
     #[test]

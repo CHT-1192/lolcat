@@ -208,6 +208,53 @@ mod tests {
     }
 
     #[test]
+    fn stream_tab_width_from_config() {
+        // `"tab": 4` → four spaces, whether streaming or anchoring.
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.tab = crate::options::TabWidth::Spaces(4);
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new(b"a\tb", 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap().matches(' ').count(), 4);
+
+        opts.anchor = true;
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new(b"a\tb", 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap().matches(' ').count(), 4);
+    }
+
+    #[test]
+    fn stream_tab_stops_match_render() {
+        // `"tab": -1` pads to the next tab stop; the streaming painter must
+        // agree byte-for-byte with the reference line renderer. angle 0
+        // (dy = 0) so both paths share the same hue phase, as in
+        // stream_no_newline_matches_render.
+        let mut opts = Options::defaults();
+        opts.os = 0.0;
+        opts.angle = 0.0;
+        opts.truecolor = true;
+        opts.pure = true;
+        opts.tab = crate::options::TabWidth::Stops;
+        let exp = {
+            let mut eng = Engine::new();
+            eng.os = opts.os;
+            let mut out = Vec::new();
+            crate::render::println("ab\tc\n", &opts, &mut eng, &mut out).unwrap();
+            out
+        };
+        let mut eng = Engine::new();
+        let mut out = Vec::new();
+        let mut r = Steps::new(b"ab\tc\n", 1);
+        cat(&mut r, &opts, &mut eng, &mut out).unwrap();
+        assert_eq!(out, exp);
+        assert_eq!(String::from_utf8(out).unwrap().matches(' ').count(), 6);
+    }
+
+    #[test]
     fn anchor_same_cell_stable_color() {
         // Same screen cell reached twice (with junk in between) must get the
         // same colour: hue depends on the position, not the stream offset.

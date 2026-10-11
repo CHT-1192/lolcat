@@ -69,8 +69,10 @@ pub(crate) fn paint_stream<R: BufRead + ?Sized>(
                         out.write_all(b"\n")?;
                     }
                     b'\t' => {
-                        // Tabs expand to eight spaces, each painted like a char.
-                        for _ in 0..8 {
+                        // Tabs expand per the `"tab"` config key: N fixed
+                        // spaces, or padding to the next 8-column tab stop
+                        // (`-1`). Each space is painted like a character.
+                        for _ in 0..opts.tab.cells(col as usize) {
                             if line_start {
                                 eng.os += dy;
                                 line_start = false;

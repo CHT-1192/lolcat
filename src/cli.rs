@@ -10,7 +10,7 @@ use clap::Parser;
 
 use crate::config::ConfigDefaults;
 use crate::help::VERSION;
-use crate::options::Options;
+use crate::options::{Options, TabWidth, TAB_STOP};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -149,6 +149,12 @@ pub(crate) fn cli_to_opts(cli: &Cli, cfg: &ConfigDefaults) -> Options {
     opts.anchor = cli.anchor;
     opts.keep = !cli.no_keep || cli.keep;
     opts.force = cli.force;
+    // Config-only key (no CLI flag): positive N = N spaces, -1 = tab stops.
+    opts.tab = match cfg.tab {
+        Some(-1) => TabWidth::Stops,
+        Some(n) if n >= 1 => TabWidth::Spaces(n as usize),
+        _ => TabWidth::Spaces(TAB_STOP),
+    };
     opts
 }
 
@@ -230,6 +236,7 @@ mod tests {
             angle: Some(180.0),
             duration: Some(9),
             speed: Some(7.5),
+            tab: None,
         };
         let opts = cli_to_opts(&Cli::parse_from(["lolcat"]), &cfg);
         assert_eq!(opts.freq, 12.0);
@@ -246,6 +253,20 @@ mod tests {
         assert_eq!(opts.angle, 90.0);
         assert_eq!(opts.speed, 7.5); // untouched by argv → config
         assert_eq!(opts.duration, 9);
+
+        // `tab` is config-only: absent → 8 fixed spaces; positive → that many
+        // spaces; -1 → tab stops.
+        assert_eq!(opts.tab, TabWidth::Spaces(8));
+        let tab_cfg = ConfigDefaults {
+            tab: Some(4),
+            ..ConfigDefaults::default()
+        };
+        assert_eq!(cli_to_opts(&cli, &tab_cfg).tab, TabWidth::Spaces(4));
+        let stops_cfg = ConfigDefaults {
+            tab: Some(-1),
+            ..ConfigDefaults::default()
+        };
+        assert_eq!(cli_to_opts(&cli, &stops_cfg).tab, TabWidth::Stops);
     }
 
     #[test]

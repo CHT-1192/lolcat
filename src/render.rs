@@ -55,7 +55,7 @@ pub(crate) fn println(
     } else {
         line
     };
-    let mut body = expand_tabs(body);
+    let mut body = expand_tabs(body, opts.tab);
     if opts.animate {
         println_ani(&mut body, opts, eng, out, chomped)?;
     } else {
@@ -239,6 +239,7 @@ mod tests {
 
     #[test]
     fn tab_expansion() {
+        // Default: eight fixed spaces.
         let mut opts = Options::defaults();
         opts.os = 1.0;
         let mut eng = Engine::new();
@@ -248,6 +249,19 @@ mod tests {
         let s = String::from_utf8(out).unwrap();
         assert_eq!(s.matches(' ').count(), 8);
         assert!(s.ends_with("a\x1b[39m\n"));
+
+        // Configured width: exactly N spaces.
+        opts.tab = crate::options::TabWidth::Spaces(3);
+        let mut out = Vec::new();
+        println("\ta\n", &opts, &mut eng, &mut out).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap().matches(' ').count(), 3);
+
+        // Tab stops: pad from the current column to the next multiple of 8.
+        opts.tab = crate::options::TabWidth::Stops;
+        let mut out = Vec::new();
+        println("ab\tc\n", &opts, &mut eng, &mut out).unwrap();
+        // "ab" + 6 pad spaces + "c"
+        assert_eq!(String::from_utf8(out).unwrap().matches(' ').count(), 6);
     }
 
     #[test]

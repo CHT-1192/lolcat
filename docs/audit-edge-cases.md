@@ -12,7 +12,7 @@ Suite size at audit time: 47 tests. Current: 61 tests.
 
 | ID | Finding | Status |
 |----|---------|--------|
-| A1 | Tab kept as a glyph cell (no expansion) | **Open** (maintainer deferred; see backlog) |
+| A1 | Tab kept as a glyph cell (no expansion) | Fixed — config-only `tab` key (N spaces, or `-1` = 8-column tab stops; default 8). Every paint path expands tabs now, including the `-a` reveal, so the leftover flash glyph at the tab column is gone. |
 | A2 | `\r` as an ordinary cell / CRLF phantom column | Fixed `12f4d15` (CRLF endings folded in `split_lines`) |
 | A3 | Interior C0 (BEL/BS/VT/FF/NUL) become cells | Fixed `12f4d15` — implemented as *any remaining interior C0 degrades the whole input to plain* (the "simplest, rule-1-compatible" option; not the drop-BEL/BS variant) |
 | A4 | Non-`m`/`G`/`C` CSI silently dropped (content flattened) | **Open** (whitelist-degrade not implemented) |
@@ -52,15 +52,11 @@ Priority order (likelihood × severity, per the original §B):
    partial support.
 3. **A16** — saturating `csi_params` digit accumulation, `usize::try_from`
    with clamp, cap pad growth (≤ 2×cols).
-4. **A1** — expand `\t` to 8 spaces in `parse_line` (byte-parity with
-   `paint_stream`) or to the next tab stop (screen-parity); maintainer
-   deferred, note the current visible artifact: a leftover flash glyph at
-   the tab column plus columns shifted left.
-5. **A8** — verify under a real pty at 80 / ≥100 cols; document the exact
+4. **A8** — verify under a real pty at 80 / ≥100 cols; document the exact
    degrade condition.
-6. **A12** — expose `interrupt_seen()` from `sigint.rs`, check it in the
+5. **A12** — expose `interrupt_seen()` from `sigint.rs`, check it in the
    reveal loop, abort with `END_RESET` + exit 130 (no `?1049l`).
-7. **A18 / A19 / A6-OSC8 / A13** — `-i` pad background reset; shared hue
+6. **A18 / A19 / A6-OSC8 / A13** — `-i` pad background reset; shared hue
    model + cumulative row offset across chunks; keep OSC 8 as a per-cell
    fmt prefix (or document); document the interrupt half-state.
 

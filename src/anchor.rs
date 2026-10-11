@@ -88,8 +88,10 @@ pub(crate) fn paint_anchored<R: BufRead + ?Sized>(
                         out.write_all(b"\r")?;
                     }
                     b'\t' => {
-                        // Tabs expand to eight cells; colour every cell.
-                        for _ in 0..8 {
+                        // Tabs expand per the `"tab"` config key; colour
+                        // every cell (screen column drives the hue here).
+                        let n = opts.tab.cells(pos.1.max(0) as usize);
+                        for _ in 0..n {
                             emit_char(out, eng, opts, reset, b" ", hue_at(eng.os, pos))?;
                             pos.1 += 1;
                         }

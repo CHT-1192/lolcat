@@ -9,12 +9,13 @@ A JSONC config file that supplies **defaults for the valued CLI options**,
 so a user can pin their favourite rainbow parameters (or default animation
 settings) without a shell alias. Decisions made with the user:
 
-- Scope: the config file carries only the **valued (numeric) options**:
-  `freq`, `seed`, `angle`, `duration`, `speed`. **No booleans** — switch
-  options (`pure`, `invert`, `truecolor`, `keep`, `anchor`, `animate`,
-  `force`) are inherently "explicit" on the command line and never come
-  from config. Behaviour-only flags (`-h`, `-v`, `-C/--convert`) likewise
-  never come from config.
+- Scope: the config file carries the **valued (numeric) options**
+  (`freq`, `seed`, `angle`, `duration`, `speed`) plus one config-only key,
+  **`tab`** (tab width — deliberately no CLI flag for it). **No booleans** —
+  switch options (`pure`, `invert`, `truecolor`, `keep`, `anchor`,
+  `animate`, `force`) are inherently "explicit" on the command line and
+  never come from config. Behaviour-only flags (`-h`, `-v`, `-C/--convert`)
+  likewise never come from config.
 - Precedence (for the keys that exist): **command line > config file >
   built-in defaults**.
 - Invalid files: **silent** (details only under `LOLCAT_DEBUG`); granularity
@@ -85,11 +86,12 @@ errors.
 
 | Key        | Type    | Default | Notes                                        |
 | ---------- | ------- | ------- | -------------------------------------------- |
-| `freq`     | number  | 60.0    | finite, > 0 in practice (validated like CLI) |
+| `freq`     | number  | 60.0    | finite, > 0 (validated like CLI)             |
 | `seed`     | integer | 0       | degrees; 0 = random starting hue; a fixed value gives repeatable output |
 | `angle`    | number  | 71.6    | finite, `-360..=360`                         |
 | `duration` | integer | 3       | ≥ 1                                          |
 | `speed`    | number  | 60.0    | finite, ≥ 0.1                                |
+| `tab`      | integer | 8       | N ≥ 1 = exactly N spaces per tab; `-1` = advance to the next 8-column tab stop. **No CLI flag** (config-only). 0/other values are skipped. Applies to every paint path (stream, `-B` anchor, `-a` reveal). |
 
 No nested objects, no arrays — flat scalar map only. Boolean switches are
 deliberately **not** configurable (see §1). Unknown keys are skipped
@@ -129,11 +131,13 @@ src/config.rs        # new module
   parse_jsonc(&str) -> …            # jsonc-parser + typed key extraction
   defaults_doc() -> String          # generated file body (keys + comments)
 src/main.rs          # call load() before clap; merge; keep -C/-h early paths
-src/cli.rs           # Option<T> for the five valued options + merge + validate
+src/cli.rs           # Option<T> for the five valued options + merge + validate;
+                     # maps `tab` to options::TabWidth (no CLI flag)
 ```
 
-`ConfigDefaults` mirrors the five valued options, all-`Option` (absent key =
-built-in default at merge time), so config never has to spell out every key.
+`ConfigDefaults` mirrors the valued options plus `tab`, all-`Option` (absent
+key = built-in default at merge time), so config never has to spell out every
+key. `tab` maps to `options::TabWidth::{Spaces(n), Stops}`.
 
 ## 8. Windows / portability notes
 

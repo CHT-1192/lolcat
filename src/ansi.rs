@@ -7,6 +7,9 @@
 //! into (escape, char) pairs, measuring byte lengths of sequences, stripping
 //! cursor-erasing ops, tab expansion, and CSI cursor-move simulation.
 
+#[cfg(test)]
+use crate::options::TabWidth;
+
 /// Scan a string into `(escape_run, char)` pairs — equivalent to Ruby's
 /// `str.scan(ANSI_ESCAPE)`.
 #[cfg(test)]
@@ -84,10 +87,20 @@ fn parse_escape(chars: &[char], i: usize) -> Option<(String, usize)> {
     }
 }
 
-/// Expand tabs to eight spaces (matches the `expand` command's tab stops).
+/// Expand tabs per the `"tab"` option (test-only reference renderer).
 #[cfg(test)]
-pub(crate) fn expand_tabs(s: &str) -> String {
-    s.replace('\t', "        ")
+pub(crate) fn expand_tabs(s: &str, tab: TabWidth) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c == '\t' {
+            for _ in 0..tab.cells(out.chars().count()) {
+                out.push(' ');
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Remove CSI cursor-erase operations (`ESC [ … @/J/K/P/X`) from a string,

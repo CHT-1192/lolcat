@@ -5,6 +5,36 @@
 //! User-facing options (`--freq`, `--seed`, `--angle`, …) and the hue
 //! phase-step model shared by every paint path.
 
+/// Terminal tab-stop interval used by [`TabWidth::Stops`].
+pub(crate) const TAB_STOP: usize = 8;
+
+/// How a tab character expands. Configured by the `"tab"` key in
+/// `lolcat.config.jsonc` (there is no CLI flag for it): a positive number
+/// means exactly that many spaces, `-1` means the next terminal tab stop.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum TabWidth {
+    /// Every tab becomes exactly this many spaces.
+    Spaces(usize),
+    /// Advance to the next multiple of [`TAB_STOP`] columns.
+    Stops,
+}
+
+impl TabWidth {
+    /// Number of cells a tab occupies when it starts at column `col`.
+    pub(crate) fn cells(self, col: usize) -> usize {
+        match self {
+            TabWidth::Spaces(n) => n,
+            TabWidth::Stops => TAB_STOP - (col % TAB_STOP),
+        }
+    }
+}
+
+impl Default for TabWidth {
+    fn default() -> TabWidth {
+        TabWidth::Spaces(TAB_STOP)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Options {
     pub(crate) freq: f64,
@@ -20,6 +50,8 @@ pub(crate) struct Options {
     pub(crate) truecolor: bool,
     pub(crate) keep: bool,
     pub(crate) force: bool,
+    /// Tab expansion (`"tab"` config key; default: 8 fixed spaces).
+    pub(crate) tab: TabWidth,
 }
 
 impl Options {
@@ -38,6 +70,7 @@ impl Options {
             truecolor: false,
             keep: true,
             force: false,
+            tab: TabWidth::default(),
         }
     }
 
@@ -97,5 +130,19 @@ mod tests {
         let (dx, dy) = opts.phase_step();
         assert!((dx - 1.894).abs() < 1e-3); // 6·cos(71.6°)
         assert!((dy - 5.693).abs() < 1e-3); // 6·sin(71.6°)
+    }
+
+    #[test]
+    fn tab_width_cells() {
+        // Default: eight fixed spaces wherever the tab appears.
+        assert_eq!(TabWidth::default(), TabWidth::Spaces(8));
+        assert_eq!(TabWidth::Spaces(4).cells(0), 4);
+        assert_eq!(TabWidth::Spaces(4).cells(9), 4);
+        // Tab stops: pad to the next multiple of 8.
+        assert_eq!(TabWidth::Stops.cells(0), 8);
+        assert_eq!(TabWidth::Stops.cells(1), 7);
+        assert_eq!(TabWidth::Stops.cells(7), 1);
+        assert_eq!(TabWidth::Stops.cells(8), 8);
+        assert_eq!(TabWidth::Stops.cells(15), 1);
     }
 }

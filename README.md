@@ -90,8 +90,10 @@ $ lolcat -A 180         # stripes reversed
 ## Configuration
 
 `lolcat` reads a JSONC config file for defaults of the valued options
-(`freq`/`seed`/`angle`/`duration`/`speed`); command-line arguments always
-win. Lookup order — first file found wins:
+(`freq`/`seed`/`angle`/`duration`/`speed`) plus one config-only key, `tab`
+(tab width: `N ≥ 1` = exactly N spaces per tab, `-1` = advance to the next
+8-column tab stop; default 8). Command-line arguments always win. Lookup
+order — first file found wins:
 
 1. `$LOLCAT_CONFIG` (explicit path)
 2. `$XDG_CONFIG_HOME/lolcat/config.jsonc` (default `~/.config/lolcat/`; on

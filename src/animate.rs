@@ -30,7 +30,7 @@ use std::time::Duration;
 use crate::ansi::escape_len;
 use crate::color::{color_for, write_sgr};
 use crate::engine::{set_mode, Engine};
-use crate::options::Options;
+use crate::options::{Options, TabWidth};
 use crate::stream::paint_stream;
 
 /// Ask the terminal for its size (rows, columns). The block path may only
@@ -185,7 +185,7 @@ fn split_lines(raw: &[u8]) -> Option<Vec<&[u8]>> {
 /// a new SGR code replaces them, which mirrors terminal behaviour closely
 /// enough for re-colouring). With `keep` disabled no prefixes are recorded,
 /// so the reveal paints plain rainbow text over any input styling.
-fn parse_line(line: &[u8], keep: bool) -> Row {
+fn parse_line(line: &[u8], keep: bool, tab: TabWidth) -> Row {
     let mut row = Row::empty();
     let mut fmt: Vec<u8> = Vec::new();
     let n = line.len();
@@ -233,6 +233,17 @@ fn parse_line(line: &[u8], keep: bool) -> Row {
                     }
                 }
             }
+            continue;
+        }
+        if b == b'\t' {
+            // Tabs expand into cells too (the `"tab"` config key), so the
+            // frozen frame keeps the plain painter's column layout instead
+            // of writing a raw TAB mid-row and leaving a flash glyph behind.
+            for _ in 0..tab.cells(row.chars.len()) {
+                row.chars.push(' ');
+                row.fmts.push(fmt.clone());
+            }
+            i += 1;
             continue;
         }
         let len = if b < 0x80 {
@@ -354,7 +365,7 @@ pub fn animate<R: BufRead + ?Sized>(
     };
     let mut all: Vec<Row> = lines
         .iter()
-        .map(|line| parse_line(line, opts.keep))
+        .map(|line| parse_line(line, opts.keep, opts.tab))
         .collect();
     if all.last().map(|l| l.chars.is_empty()) == Some(true) {
         all.pop(); // trailing newline
@@ -563,7 +574,7 @@ mod tests {
     fn parse_line_keeps_bg_fmt() {
         // fastfetch-style palette line: SGR background blocks survive as
         // per-cell prefixes, and the escapes themselves are not text.
-        let row = parse_line(b"\x1b[40mAB\x1b[41mC\x1b[42mDEF", true);
+        let row = parse_line(b"\x1b[40mAB\x1b[41mC\x1b[42mDEF", true, TabWidth::Spaces(8));
         let s: String = row.chars.iter().collect();
         assert_eq!(s, "ABCDEF");
         assert_eq!(row.fmts[0], b"\x1b[40m".to_vec());
@@ -577,7 +588,7 @@ mod tests {
     #[test]
     fn parse_line_abs_column_padding() {
         // fastfetch pads with ESC[47G; the value must land after 46 cells.
-        let row = parse_line(b"CPU: \x1b[47GApple", true);
+        let row = parse_line(b"CPU: \x1b[47GApple", true, TabWidth::Spaces(8));
         // 5 lead + 41 pad (target col 47 is 1-based → index 46) + 5 value
         assert_eq!(row.chars.len(), 51);
         assert_eq!(row.chars[0..5].iter().collect::<String>(), "CPU: ");
@@ -587,10 +598,27 @@ mod tests {
 
     #[test]
     fn parse_line_no_keep_drops_fmt() {
-        let row = parse_line(b"\x1b[40mAB\x1b[41mCD", false);
+        let row = parse_line(b"\x1b[40mAB\x1b[41mCD", false, TabWidth::Spaces(8));
         let s: String = row.chars.iter().collect();
         assert_eq!(s, "ABCD");
         assert!(row.fmts.iter().all(|f| f.is_empty()));
+    }
+
+    #[test]
+    fn parse_line_expands_tabs() {
+        // Fixed width: N spaces wherever the tab appears.
+        let row = parse_line(b"a\tb", true, TabWidth::Spaces(4));
+        let s: String = row.chars.iter().collect();
+        assert_eq!(s, "a    b");
+        assert_eq!(row.chars.len(), row.fmts.len());
+        // Tab stops: pad from the current column to the next multiple of 8.
+        let row = parse_line(b"abc\tz", true, TabWidth::Stops);
+        let s: String = row.chars.iter().collect();
+        assert_eq!(s, "abc     z"); // 3 + 5 pad = column 8
+                                    // The default stays 8 fixed spaces (historical layout).
+        let row = parse_line(b"a\tb", true, TabWidth::default());
+        let s: String = row.chars.iter().collect();
+        assert_eq!(s, "a        b");
     }
 
     #[test]
@@ -600,13 +628,13 @@ mod tests {
         for tail in [&b"\x1b[31"[..], &b"\x1b["[..], &b"\x1b"[..]] {
             let mut line = b"ab".to_vec();
             line.extend_from_slice(tail);
-            let row = parse_line(&line, true);
+            let row = parse_line(&line, true, TabWidth::Spaces(8));
             let s: String = row.chars.iter().collect();
             assert_eq!(s, "ab", "tail {:?}", tail);
         }
         // An incomplete sequence followed by a later complete one: parsing
         // resumes at the next ESC, which is handled normally.
-        let row = parse_line(b"ab\x1b[31\x1b[32mX", true);
+        let row = parse_line(b"ab\x1b[31\x1b[32mX", true, TabWidth::Spaces(8));
         let s: String = row.chars.iter().collect();
         assert_eq!(s, "abX");
         assert_eq!(row.fmts.last().unwrap(), b"\x1b[32m");
