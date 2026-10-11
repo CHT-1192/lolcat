@@ -6,7 +6,7 @@ commit `4961aee`. The original text is preserved verbatim in
 what has since been fixed. Line references in the original text refer to
 the `4961aee` tree and may have drifted.
 
-Suite size at audit time: 47 tests. Current: 61 tests.
+Suite size at audit time: 47 tests. Current: 73 tests.
 
 ## Status at a glance
 
@@ -36,11 +36,14 @@ Suite size at audit time: 47 tests. Current: 61 tests.
 
 Commits: `12f4d15` = "Degrade control-byte rows; fold CRLF; fix -a tail edge
 cases"; `62678da` = "config: read lolcat.config.jsonc for option defaults"
-(includes the `--speed` finiteness check).
+(includes the `--speed` finiteness check); `888ff22` = config-only `tab` key
++ tab expansion in `-a` (A1); `8fffe2e` = `-Q/--quantize`; `af5b519` =
+display-width aware painting (A7).
 
-## Remaining backlog
+## Remaining backlog (A series)
 
-Priority order (likelihood × severity, per the original §B):
+Priority order (likelihood × severity, per the original §B). Items
+introduced by later work live in the [B series](#b-series-introduced-by-later-work):
 
 1. **A4 (+A5)** — whitelist-degrade: during `animate()`'s parse pass, if a
    line contains a CSI whose final byte ∉ {`m`,`G`,`C`} (or an OSC/DCS),
@@ -55,6 +58,95 @@ Priority order (likelihood × severity, per the original §B):
 5. **A18 / A19 / A6-OSC8 / A13** — `-i` pad background reset; shared hue
    model + cumulative row offset across chunks; keep OSC 8 as a per-cell
    fmt prefix (or document); document the interrupt half-state.
+
+## B series (introduced by later work)
+
+Findings created by features added after the original audit: the config
+file, the config-only `tab` key, `-Q/--quantize` and the display-width
+work (A7). Same format as the A findings: trigger / evidence / impact /
+fix / effort. All are **open** unless stated.
+
+**B1. The `tab` config key has no upper bound (OOM / output blow-up).**
+*Trigger:* a config file containing a large but valid value, e.g.
+`"tab": 1000000000`. *Evidence:* validation accepts any integer ≥ 1
+(`src/config.rs` `"tab"` arm), and `-a`'s `parse_line` then pushes that many
+cells — each with a `String` for zero-width extras — in a loop
+(`src/animate.rs:275`); on a real tty (where the animation path actually
+runs) that is an OOM/hang. The plain path expands the same count, writing
+that many bytes to stdout. The same class of persisted-bad-value applies to
+`duration` (u64::MAX → the reveal effectively never ends; **B8**). *Fix:*
+clamp both at config load (`tab` to something like ≤ 1024, `duration` to a
+sane maximum) and log the clamp under `LOLCAT_DEBUG`; fold into A16's
+overflow work. *Effort:* S.
+
+**B2. A UTF-8 BOM makes the whole config file silently ignored.**
+*Trigger:* a JSONC file saved by a Windows editor (Notepad, some VS Code
+setups) that starts with `EF BB BF`. *Evidence (measured):* with a BOM the
+parser reports `kind: UnexpectedToken` at line 1 column 1 and the file is
+dropped — with the silent-by-design policy the user sees "my edits do
+nothing". *Fix:* strip a leading `\u{feff}` before parsing. *Effort:* S.
+
+**B3. Wide cells flicker with a one-column random glyph.**
+*Trigger:* `-a` on CJK/emoji text. *Evidence:* the flash branch always
+writes `random_glyph()` (0x21–0x7e, one column, `src/animate.rs:543`), so
+a two-column cell shows its glyph plus one blank column while flashing; an
+interrupt mid-band leaves that half-cell on screen. Freezing overwrites
+both columns, so the final frame is correct. *Fix:* pick a random glyph
+whose width matches the cell (or reuse the real glyph's width). *Effort:* S.
+
+**B4. Combining marks differ byte-wise between plain and `-a`.**
+*Trigger:* text with combining marks / variation selectors (e.g.
+`A`+U+0301, emoji + VS16). *Evidence:* the plain painter emits each
+character as its own pair with its own SGR (matching lolcat's pairing
+model, hue = the *next* column, `src/stream.rs`), while `-a` glues
+zero-width bytes into the base cell's glyph (`Row::extras`,
+`src/animate.rs`) and colours them with the base cell's hue. Visually
+identical; "frozen frame == plain output" therefore does not hold at the
+byte level for such input (and the mark's colour can tint the diacritic on
+some terminals). *Fix:* document (changing the plain path would move away
+from lolcat's pairing model). *Effort:* S (doc).
+
+**B5. Zero-width-joiner *grapheme clusters* and East-Asian ambiguous
+widths are still approximate.** *Evidence:* `char_width` is per character
+(`unicode-width`), so a family emoji is two wide cells rather than one
+cluster (ZWJ has width 0 and is glued to the previous base); and
+`unicode-width` treats East-Asian *ambiguous* characters as narrow, while
+some terminals are configured to render them wide — the gate and the
+reveal geometry then disagree with what the terminal draws. *Fix:*
+document as a known limitation (cluster segmentation would need a
+grapheme-segmentation dependency). *Effort:* S (doc).
+
+**B6. Config keys and CLI options are now asymmetric, and `--help`
+mentions neither the config file nor `tab`.** *Evidence:* `tab` is
+config-only (by request), `-Q/--quantize` is CLI-only (by request), and
+the help text is intentionally hand-maintained without any config line
+(`src/help.rs`); only README/`docs/config.md` describe them. *Fix:*
+document the asymmetry explicitly in `docs/config.md` (partly done) and
+decide whether `--help` should gain a one-line pointer. *Effort:* S (doc).
+
+**B7. The first run creates a config file next to the executable.**
+*Trigger:* any run on a machine with no config at any layer (including CI
+smoke tests and package installs in read-only prefixes). *Evidence:*
+`auto_generate()` writes the default document into the executable's
+directory, falling back to the user layer and then to silence
+(`src/config.rs`); `-h`/`-v`/`-C` return before that call, so they never
+create it (verified by reading `src/main.rs`). *Impact:* an unexpected file
+appears; on read-only installs the user-layer directory is retried every
+run. *Fix:* document (design decision); optionally report the created path
+under `LOLCAT_DEBUG`. *Effort:* S (doc).
+
+**B8. Persisted bad values reproduce on every run.** *Evidence:* config
+values are read on every invocation, so an extreme `duration`, `speed` or
+`tab` keeps misbehaving until the file is edited — unlike a one-off CLI
+typo. `speed` is finite-checked but unbounded (1e300 → a zero-length frame
+duration → a busy reveal loop); `duration` is unbounded (B1). *Fix:* the
+same clamps as B1, plus a range check for `speed` (e.g. cap at a few
+thousand). *Effort:* S, same batch as B1/A16.
+
+**B9 (note, not a defect).** With A7 fixed, wide rows trip the `-a` width
+gate sooner (40 CJK glyphs = 80 columns), so text that used to be animated
+may now degrade to plain colouring on narrow terminals. The behaviour is
+correct; the gate itself is A8 and should be documented there.
 
 ---
 
